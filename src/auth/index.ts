@@ -17,4 +17,6 @@ export {
   getAllAuthStatus,
   formatAuthStatus,
   formatAllAuthStatus,
+  clearAuthTokens,
+  listReauthServices,
 } from './status.js';

@@ -5,12 +5,15 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "cope": "./dist/index.js"
+    "cope": "./dist/index.js",
+    "cope-mcp": "./dist/mcp-server.js"
   },
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "mcp": "node dist/mcp-server.js",
+    "mcp:dev": "tsx src/mcp-server.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

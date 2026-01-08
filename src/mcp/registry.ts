@@ -21,8 +21,13 @@ export interface McpServerConfig {
 
 /**
  * Static server configurations (no env vars needed at definition time)
+ *
+ * For Docker containers, use argsBuilder to inject env vars with actual values
+ * since `-e VAR` only works when VAR is in the shell's environment.
  */
-const staticConfigs: Record<string, Omit<McpServerConfig, 'env'> & {
+const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
+  args?: string[];
+  argsBuilder?: () => string[];
   envBuilder?: () => Record<string, string>;
 }> = {
   'gmail-work': {
@@ -36,18 +41,12 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env'> & {
   'slack-tatoma': {
     name: 'slack-tatoma',
     description: 'Tatoma Slack workspace',
-    type: 'docker',
-    command: 'docker',
-    args: [
-      'run',
-      '-i',
-      '--rm',
-      '-e', 'SLACK_MCP_XOXB_TOKEN',
-      '-e', 'SLACK_MCP_ADD_MESSAGE_TOOL=true',
-      'ghcr.io/korotovsky/slack-mcp-server:latest',
-    ],
+    type: 'npx',
+    command: 'npx',
+    args: ['-y', 'slack-mcp-server@latest', '--transport', 'stdio'],
     envBuilder: () => ({
       SLACK_MCP_XOXB_TOKEN: process.env.SLACK_MCP_XOXB_TOKEN ?? '',
+      SLACK_MCP_ADD_MESSAGE_TOOL: 'true',
     }),
   },
 
@@ -89,16 +88,14 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env'> & {
     description: 'Lifelog via Omi wearable',
     type: 'docker',
     command: 'docker',
-    args: [
+    // Use argsBuilder to inject env var value at runtime
+    argsBuilder: () => [
       'run',
       '-i',
       '--rm',
-      '-e', 'OMI_API_KEY',
+      '-e', `OMI_API_KEY=${process.env.OMI_API_KEY ?? ''}`,
       'omiai/mcp-server',
     ],
-    envBuilder: () => ({
-      OMI_API_KEY: process.env.OMI_API_KEY ?? '',
-    }),
   },
 
   // OAuth-based services use mcp-remote to handle browser auth flow
@@ -133,18 +130,20 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env'> & {
 
 /**
  * Get MCP server configuration by name
- * Environment variables are evaluated lazily when this is called
+ * Environment variables and args are evaluated lazily when this is called
  */
 export function getMcpServerConfig(name: string): McpServerConfig | undefined {
   const staticConfig = staticConfigs[name];
   if (!staticConfig) return undefined;
 
-  // Build env vars lazily (now that dotenv has loaded)
-  const { envBuilder, ...rest } = staticConfig;
+  // Build env vars and args lazily (now that dotenv has loaded)
+  const { envBuilder, argsBuilder, args, ...rest } = staticConfig;
   const env = envBuilder ? envBuilder() : {};
+  const resolvedArgs = argsBuilder ? argsBuilder() : args;
 
   return {
     ...rest,
+    args: resolvedArgs,
     env,
   } as McpServerConfig;
 }

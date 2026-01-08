@@ -10,10 +10,20 @@ import * as readline from 'readline';
 import chalk from 'chalk';
 import ora from 'ora';
 import { createCopeAgent } from './agent.js';
-import { formatAllAuthStatus } from './auth/index.js';
+import { formatAllAuthStatus, clearAuthTokens, listReauthServices, MCP_AUTH_INFO } from './auth/index.js';
+import {
+  listCredentials,
+  setCredential,
+  deleteCredential,
+  getConfigDir,
+  loadCredentialsIntoEnv,
+} from './config/index.js';
 
-// Load .env file from project root
-config();
+// Load credentials from ~/.config/cope-agent/.env first
+loadCredentialsIntoEnv();
+
+// Then load local .env (for development override)
+config({ quiet: true });
 
 // Check for API key at startup
 function checkApiKey(): void {
@@ -128,6 +138,13 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Detect exit intent without slash
+    const exitPhrases = ['exit', 'quit', 'bye', 'goodbye', 'q'];
+    if (exitPhrases.includes(trimmed.toLowerCase())) {
+      console.log(colors.dim('  Goodbye!'));
+      process.exit(0);
+    }
+
     // Process message
     const spinner = ora({
       text: 'Thinking...',
@@ -190,6 +207,18 @@ async function handleCommand(
 ): Promise<void> {
   const cmd = command.toLowerCase().trim();
 
+  // Handle /mcp subcommands first (before switch)
+  if (cmd.startsWith('/mcp ')) {
+    await handleMcpCommand(cmd);
+    return;
+  }
+
+  // Handle /credentials subcommands
+  if (cmd.startsWith('/cred')) {
+    handleCredentialsCommand(command); // Use original case for values
+    return;
+  }
+
   switch (cmd) {
     case '/quit':
     case '/exit':
@@ -222,10 +251,12 @@ async function handleCommand(
     case '/?':
       console.log();
       console.log(colors.dim('  Commands:'));
-      console.log(colors.dim('    /quit, /q     - Exit'));
+      console.log(colors.dim('    /quit, /q, exit, quit, bye - Exit'));
       console.log(colors.dim('    /clear, /c    - Clear conversation'));
       console.log(colors.dim('    /status, /s   - Show status'));
       console.log(colors.dim('    /mcp          - Show MCP auth status'));
+      console.log(colors.dim('    /mcp auth <server> - Re-authenticate a service'));
+      console.log(colors.dim('    /credentials  - Manage stored credentials'));
       console.log(colors.dim('    /help, /h     - Show this help'));
       console.log();
       console.log(colors.dim('  Quick commands:'));
@@ -239,6 +270,104 @@ async function handleCommand(
     default:
       console.log(colors.dim(`  Unknown command: ${command}`));
       console.log(colors.dim('  Try /help for available commands.'));
+  }
+}
+
+/**
+ * Handle /mcp subcommands
+ */
+async function handleMcpCommand(cmd: string): Promise<void> {
+  const parts = cmd.split(/\s+/);
+  const subcommand = parts[1];
+  const arg = parts[2];
+
+  switch (subcommand) {
+    case 'auth':
+    case 'reauth':
+      if (!arg) {
+        console.log();
+        console.log(colors.dim('  Usage: /mcp auth <server>'));
+        console.log();
+        console.log(colors.dim('  Services that support re-auth:'));
+        for (const service of listReauthServices()) {
+          const info = MCP_AUTH_INFO[service];
+          console.log(colors.dim(`    ${service} - ${info?.displayName || service}`));
+        }
+        console.log();
+        return;
+      }
+
+      const result = clearAuthTokens(arg);
+      console.log();
+      if (result.success) {
+        console.log(colors.success(`  ✅ ${result.message}`));
+      } else {
+        console.log(colors.error(`  ❌ ${result.message}`));
+      }
+      console.log();
+      break;
+
+    default:
+      console.log(colors.dim(`  Unknown /mcp subcommand: ${subcommand}`));
+      console.log(colors.dim('  Available: /mcp, /mcp auth <server>'));
+  }
+}
+
+/**
+ * Handle /credentials subcommands
+ */
+function handleCredentialsCommand(command: string): void {
+  const parts = command.trim().split(/\s+/);
+  const subcommand = parts[1]?.toLowerCase();
+  const key = parts[2]?.toUpperCase();
+  const value = parts.slice(3).join(' '); // Allow spaces in values
+
+  switch (subcommand) {
+    case undefined:
+    case 'list':
+      // List all credentials
+      console.log();
+      console.log(colors.dim(`  📁 Credentials stored in: ${getConfigDir()}`));
+      console.log();
+      const creds = listCredentials();
+      for (const cred of creds) {
+        const icon = cred.set ? '✅' : '⬜';
+        console.log(colors.dim(`  ${icon} ${cred.key}`));
+        console.log(colors.dim(`     ${cred.description}`));
+      }
+      console.log();
+      console.log(colors.dim('  Usage:'));
+      console.log(colors.dim('    /credentials set <KEY> <value>'));
+      console.log(colors.dim('    /credentials delete <KEY>'));
+      console.log();
+      break;
+
+    case 'set':
+      if (!key || !value) {
+        console.log(colors.error('  Usage: /credentials set <KEY> <value>'));
+        return;
+      }
+      setCredential(key, value);
+      console.log(colors.success(`  ✅ Set ${key}`));
+      break;
+
+    case 'delete':
+    case 'remove':
+    case 'unset':
+      if (!key) {
+        console.log(colors.error('  Usage: /credentials delete <KEY>'));
+        return;
+      }
+      if (deleteCredential(key)) {
+        console.log(colors.success(`  ✅ Deleted ${key}`));
+      } else {
+        console.log(colors.dim(`  ${key} was not set`));
+      }
+      break;
+
+    default:
+      console.log(colors.dim(`  Unknown /credentials subcommand: ${subcommand}`));
+      console.log(colors.dim('  Available: list, set, delete'));
   }
 }
 
