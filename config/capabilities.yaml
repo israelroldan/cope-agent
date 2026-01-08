@@ -1,0 +1,325 @@
+# COPE Capability Manifest
+# Lightweight discovery layer - triggers map to specialist agents
+# ~800 tokens vs ~70k for full MCP tool schemas
+
+version: 1
+
+identity:
+  name: Cope
+  role: Israel's AI executive assistant
+  framework: C.O.P.E. (Clarify, Organise, Prioritise, Execute)
+
+domains:
+  email:
+    description: "Email management for Tatoma work account"
+    triggers:
+      - inbox
+      - unread
+      - email
+      - mail
+      - send
+      - draft
+      - reply
+      - compose
+      - gmail
+    specialist: email-agent
+    mcp_servers:
+      - gmail-work
+    vip_senders:
+      - Sander Kok
+      - Maarten van den Heuvel-Erp
+      - Thomas Verhappen
+    workflows:
+      - InboxDigest
+      - SearchEmail
+      - ComposeEmail
+      - TrackResponses
+
+  calendar:
+    description: "Calendar across Work and Home with school constraints"
+    triggers:
+      - calendar
+      - schedule
+      - meeting
+      - free
+      - available
+      - event
+      - book
+      - agenda
+    specialist: calendar-agent
+    mcp_servers:
+      - google-calendar-work
+      - ical-home
+      - magister
+    constraints:
+      - "amelie_pickup is HARD constraint on availability"
+      - "always check school times before afternoon meetings"
+    workflows:
+      - DailyAgenda
+      - CheckAvailability
+      - CreateEvent
+      - SuggestTime
+
+  slack:
+    description: "Tatoma Slack workspace communication"
+    triggers:
+      - slack
+      - channel
+      - message
+      - founders
+      - team
+      - work chat
+      - dm
+    specialist: slack-agent
+    mcp_servers:
+      - slack-tatoma
+    priority_channels:
+      - "#founders-talk"
+      - "#product"
+      - "#-ai-rollout-project"
+    workflows:
+      - DailyDigest
+      - ChannelCatchup
+      - CommitmentScan
+
+  notion_personal:
+    description: "LifeOS - personal operating system in Notion"
+    triggers:
+      - lifeos
+      - tasks
+      - inbox
+      - decisions
+      - goals
+      - journal
+      - priorities
+      - open loops
+      - capture
+      - quick add
+    specialist: notion-personal-agent
+    mcp_servers:
+      - notion-personal
+    databases:
+      tasks: "collection://2dff8fbf-cf75-81ec-9d5a-000bd513a35c"
+      inbox: "collection://2dff8fbf-cf75-8171-b984-000b1a6487f3"
+      decisions: "collection://8df780cc-91fe-4c51-9c59-d8f20c7dbd7b"
+      journal: "collection://2dff8fbf-cf75-816e-8222-000ba6610bff"
+      goals: "collection://2dff8fbf-cf75-811f-a2e7-000b753d5c5a"
+    workflows:
+      - QuickCapture
+      - TasksToday
+      - OpenLoops
+      - LogDecision
+
+  notion_work:
+    description: "Tatoma work Notion workspace"
+    triggers:
+      - notion work
+      - work docs
+      - project page
+      - wiki
+      - work notion
+    specialist: notion-work-agent
+    mcp_servers:
+      - notion-work
+    workflows:
+      - SearchPages
+      - ReadPage
+      - CreatePage
+
+  lifelog:
+    description: "Omi wearable memories and conversations"
+    triggers:
+      - lifelog
+      - memories
+      - what did I say
+      - conversations
+      - remember
+      - recall
+      - omi
+    specialist: lifelog-agent
+    mcp_servers:
+      - omi
+    workflows:
+      - LifelogDigest
+      - SearchMemories
+      - GetConversations
+
+  school:
+    description: "Amelie & Philippe school schedules"
+    triggers:
+      - school
+      - pickup
+      - dropoff
+      - kids
+      - children
+      - amelie
+      - philippe
+      - magister
+    specialist: school-agent
+    mcp_servers:
+      - magister
+    constraints:
+      - "amelie pickup by Israel - HARD constraint"
+      - "philippe pickup by wife unless explicitly mentioned"
+    workflows:
+      - GetSchedule
+      - GetPickupTime
+      - GetDropoffTime
+
+  miro:
+    description: "Miro boards for diagrams and visual collaboration"
+    triggers:
+      - miro
+      - board
+      - diagram
+      - whiteboard
+      - visual
+    specialist: miro-agent
+    mcp_servers:
+      - miro
+    workflows:
+      - GetBoardDocs
+      - CreateDiagram
+
+# Multi-domain workflows
+workflows:
+  # Daily workflows
+  daily_briefing:
+    description: "Morning routine - school, calendar, email, slack, priorities"
+    triggers:
+      - briefing
+      - "what's on today"
+      - "what's happening today"
+      - daily briefing
+      - morning briefing
+      - start my day
+      - good morning
+      - "today's schedule"
+      - "catch me up"
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: school
+        task: "Get dropoff/pickup times and any schedule changes"
+      - domain: calendar
+        task: "Get today's events from all calendars, flag conflicts"
+      - domain: email
+        task: "Check inbox, flag VIPs (Sander, Maarten, Thomas)"
+      - domain: slack
+        task: "Check overnight activity in #founders-talk, #product"
+      - domain: notion_personal
+        task: "Get priorities, open loops, inbox items"
+      - domain: lifelog
+        task: "Get overnight conversations and memories"
+
+  daily_close:
+    description: "End-of-day routine - capture decisions, review progress"
+    triggers:
+      - done for the day
+      - end my day
+      - daily close
+      - day close
+      - close the day
+      - wrap up
+      - "what'd I do today"
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: notion_personal
+        task: "Get today's decisions, completed tasks, open loops"
+      - domain: lifelog
+        task: "Get today's lifelog summary"
+
+  # Weekly workflows
+  week_start:
+    description: "Monday planning - set priorities and focus for the week"
+    triggers:
+      - week start
+      - start the week
+      - monday planning
+      - weekly planning
+      - "what's this week"
+      - set up the week
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: notion_personal
+        task: "Get goal progress, open loops, high priority tasks"
+      - domain: calendar
+        task: "Get week overview, major commitments"
+
+  week_mid:
+    description: "Wednesday check-in - course correct the week"
+    triggers:
+      - week check
+      - mid-week
+      - midweek
+      - wednesday check
+      - how is the week going
+      - week progress
+    specialist: cope-workflow-agent
+
+  week_end:
+    description: "Friday review - wins, learnings, carries"
+    triggers:
+      - week end
+      - end the week
+      - weekly review
+      - friday review
+      - close the week
+      - week wrap up
+      - "how'd the week go"
+      - retrospective
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: notion_personal
+        task: "Get completed tasks, decisions, goal progress, carries"
+      - domain: lifelog
+        task: "Get week's lifelog summary"
+
+  # COPE thinking phases
+  clarify:
+    description: "COPE Phase 1 - define the real problem"
+    triggers:
+      - clarify
+      - clarify this
+      - "what's the real problem"
+      - help me think through this
+      - problem definition
+      - "i'm stuck"
+      - "i'm not sure what the problem is"
+    specialist: cope-workflow-agent
+
+  organise:
+    description: "COPE Phase 2 - map constraints and context"
+    triggers:
+      - organise
+      - organize
+      - map the context
+      - what are the constraints
+      - who are the stakeholders
+      - "what's been tried"
+      - dependencies
+    specialist: cope-workflow-agent
+
+  prioritise:
+    description: "COPE Phase 3 - decide what matters now"
+    triggers:
+      - prioritise
+      - prioritize
+      - what should I do first
+      - too many options
+      - everything feels urgent
+      - help me decide
+      - what matters most
+      - rank these
+    specialist: cope-workflow-agent
+
+  execute:
+    description: "COPE Phase 4 - turn decisions into action"
+    triggers:
+      - execute
+      - what do I do now
+      - next action
+      - how do I start
+      - make it actionable
+      - break it down
+      - turn this into tasks
+    specialist: cope-workflow-agent
