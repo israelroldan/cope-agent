@@ -5,8 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "cope": "./dist/index.js",
-    "cope-mcp": "./dist/mcp-server.js"
+    "cope-agent": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
