@@ -2,69 +2,18 @@
  * Auth Status Module
  *
  * Check authentication status for all MCP servers.
+ * Uses registry.ts as single source of truth for server configs.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { execSync } from 'child_process';
 import type { AuthStatus } from './types.js';
-
-/**
- * MCP servers and their auth requirements
- */
-export const MCP_AUTH_INFO: Record<string, {
-  displayName: string;
-  authType: 'mcp-remote' | 'env' | 'auto' | 'none';
-  envVars?: string[];
-  notes?: string;
-}> = {
-  'gmail-work': {
-    displayName: 'Gmail (Work)',
-    authType: 'auto',
-    notes: 'Browser opens on first use',
-  },
-  'google-calendar-work': {
-    displayName: 'Google Calendar (Work)',
-    authType: 'auto',
-    notes: 'Browser opens on first use',
-  },
-  'slack-tatoma': {
-    displayName: 'Slack (Tatoma)',
-    authType: 'env',
-    envVars: ['SLACK_MCP_XOXB_TOKEN'],
-  },
-  'magister': {
-    displayName: 'Magister (School)',
-    authType: 'env',
-    envVars: ['MAGISTER_USER', 'MAGISTER_PASS'],
-  },
-  'omi': {
-    displayName: 'Omi (Lifelog)',
-    authType: 'env',
-    envVars: ['OMI_API_KEY'],
-  },
-  'ical-home': {
-    displayName: 'iCal (Home)',
-    authType: 'none',
-    notes: 'Local calendars',
-  },
-  'notion-personal': {
-    displayName: 'Notion (Personal)',
-    authType: 'mcp-remote',
-    notes: 'Uses mcp-remote: browser opens on first use',
-  },
-  'notion-work': {
-    displayName: 'Notion (Work)',
-    authType: 'mcp-remote',
-    notes: 'Uses mcp-remote: browser opens on first use',
-  },
-  'miro': {
-    displayName: 'Miro',
-    authType: 'mcp-remote',
-    notes: 'Uses mcp-remote: browser opens on first use',
-  },
-};
+import {
+  getAllMcpServerConfigs,
+  getMcpServerConfig,
+  type McpServerConfig,
+} from '../mcp/registry.js';
 
 /**
  * Check if environment variables are set
@@ -78,9 +27,9 @@ function checkEnvVars(envVars: string[]): { set: boolean; missing: string[] } {
  * Get auth status for a single service
  */
 export function getAuthStatus(service: string): AuthStatus {
-  const info = MCP_AUTH_INFO[service];
-  
-  if (!info) {
+  const config = getMcpServerConfig(service);
+
+  if (!config) {
     return {
       service,
       displayName: service,
@@ -88,27 +37,27 @@ export function getAuthStatus(service: string): AuthStatus {
       error: 'Unknown service',
     };
   }
-  
+
   const status: AuthStatus = {
     service,
-    displayName: info.displayName,
+    displayName: config.displayName,
     authenticated: false,
   };
-  
-  switch (info.authType) {
+
+  switch (config.authType) {
     case 'none':
       status.authenticated = true;
       break;
-      
+
     case 'auto':
     case 'mcp-remote':
       // These handle auth automatically via browser
       status.authenticated = true;
       break;
-      
+
     case 'env':
-      if (info.envVars) {
-        const envCheck = checkEnvVars(info.envVars);
+      if (config.authEnvVars) {
+        const envCheck = checkEnvVars(config.authEnvVars);
         status.authenticated = envCheck.set;
         if (!envCheck.set) {
           status.error = `Missing: ${envCheck.missing.join(', ')}`;
@@ -116,7 +65,7 @@ export function getAuthStatus(service: string): AuthStatus {
       }
       break;
   }
-  
+
   return status;
 }
 
@@ -124,7 +73,7 @@ export function getAuthStatus(service: string): AuthStatus {
  * Get auth status for all MCP servers
  */
 export function getAllAuthStatus(): AuthStatus[] {
-  return Object.keys(MCP_AUTH_INFO).map(getAuthStatus);
+  return getAllMcpServerConfigs().map(config => getAuthStatus(config.name));
 }
 
 /**
@@ -133,11 +82,11 @@ export function getAllAuthStatus(): AuthStatus[] {
 export function formatAuthStatus(status: AuthStatus): string {
   const icon = status.authenticated ? '✅' : '❌';
   let line = `${icon} ${status.displayName}`;
-  
+
   if (!status.authenticated && status.error) {
     line += ` - ${status.error}`;
   }
-  
+
   return line;
 }
 
@@ -145,14 +94,15 @@ export function formatAuthStatus(status: AuthStatus): string {
  * Format all auth status for display
  */
 export function formatAllAuthStatus(): string {
-  const statuses = getAllAuthStatus();
+  const configs = getAllMcpServerConfigs();
+  const statuses = configs.map(c => getAuthStatus(c.name));
   const lines: string[] = ['📋 MCP Authentication Status\n'];
 
   const groups = {
-    mcpRemote: statuses.filter(s => MCP_AUTH_INFO[s.service]?.authType === 'mcp-remote'),
-    env: statuses.filter(s => MCP_AUTH_INFO[s.service]?.authType === 'env'),
-    auto: statuses.filter(s => MCP_AUTH_INFO[s.service]?.authType === 'auto'),
-    none: statuses.filter(s => MCP_AUTH_INFO[s.service]?.authType === 'none'),
+    mcpRemote: statuses.filter((s, i) => configs[i].authType === 'mcp-remote'),
+    env: statuses.filter((s, i) => configs[i].authType === 'env'),
+    auto: statuses.filter((s, i) => configs[i].authType === 'auto'),
+    none: statuses.filter((s, i) => configs[i].authType === 'none'),
   };
 
   if (groups.mcpRemote.length > 0) {
@@ -185,40 +135,6 @@ export function formatAllAuthStatus(): string {
 }
 
 /**
- * Token storage locations for services that support re-auth
- */
-const TOKEN_PATHS: Record<string, {
-  type: 'mcp-remote' | 'file';
-  url?: string;  // For mcp-remote, compute hash from URL
-  paths?: string[];  // For file-based, direct paths to delete
-}> = {
-  'notion-personal': {
-    type: 'mcp-remote',
-    url: 'https://mcp.notion.com/mcp',
-  },
-  'notion-work': {
-    type: 'mcp-remote',
-    url: 'https://mcp.notion.com/mcp',  // Same URL, same tokens
-  },
-  'miro': {
-    type: 'mcp-remote',
-    url: 'https://mcp.miro.com',
-  },
-  'gmail-work': {
-    type: 'file',
-    paths: [
-      path.join(process.env.HOME || '', '.gmail-mcp'),
-    ],
-  },
-  'google-calendar-work': {
-    type: 'file',
-    paths: [
-      path.join(process.env.HOME || '', '.config', 'google-calendar-mcp'),
-    ],
-  },
-};
-
-/**
  * Find mcp-remote auth directory (handles version variations)
  */
 function findMcpRemoteDir(): string | null {
@@ -234,42 +150,34 @@ function findMcpRemoteDir(): string | null {
  * Clear cached tokens for a service to force re-authentication
  */
 export function clearAuthTokens(service: string): { success: boolean; message: string } {
-  const info = MCP_AUTH_INFO[service];
-  if (!info) {
+  const config = getMcpServerConfig(service);
+  if (!config) {
     return { success: false, message: `Unknown service: ${service}` };
   }
 
   // Env-based services can't be re-authed this way
-  if (info.authType === 'env') {
+  if (config.authType === 'env') {
     return {
       success: false,
-      message: `${info.displayName} uses environment variables. Update your .env file instead.`
+      message: `${config.displayName} uses environment variables. Update your .env file instead.`
     };
   }
 
-  if (info.authType === 'none') {
+  if (config.authType === 'none') {
     return {
       success: false,
-      message: `${info.displayName} doesn't require authentication.`
-    };
-  }
-
-  const tokenInfo = TOKEN_PATHS[service];
-  if (!tokenInfo) {
-    return {
-      success: false,
-      message: `No token path configured for ${info.displayName}`
+      message: `${config.displayName} doesn't require authentication.`
     };
   }
 
   try {
-    if (tokenInfo.type === 'mcp-remote' && tokenInfo.url) {
-      // Compute hash from URL and delete those files
-      const hash = crypto.createHash('md5').update(tokenInfo.url).digest('hex');
+    // Handle mcp-remote OAuth tokens
+    if (config.authType === 'mcp-remote' && config.authUrl) {
+      const hash = crypto.createHash('md5').update(config.authUrl).digest('hex');
       const mcpDir = findMcpRemoteDir();
 
       if (!mcpDir) {
-        return { success: true, message: `No cached tokens found for ${info.displayName}` };
+        return { success: true, message: `No cached tokens found for ${config.displayName}` };
       }
 
       const patterns = [
@@ -290,21 +198,21 @@ export function clearAuthTokens(service: string): { success: boolean; message: s
       if (deleted > 0) {
         return {
           success: true,
-          message: `Cleared ${deleted} token files for ${info.displayName}. Browser will open on next use.`
+          message: `Cleared ${deleted} token files for ${config.displayName}. Browser will open on next use.`
         };
       } else {
         return {
           success: true,
-          message: `No cached tokens found for ${info.displayName}`
+          message: `No cached tokens found for ${config.displayName}`
         };
       }
     }
 
-    if (tokenInfo.type === 'file' && tokenInfo.paths) {
+    // Handle file-based auth (auto type with authPaths)
+    if (config.authPaths && config.authPaths.length > 0) {
       let deleted = 0;
-      for (const tokenPath of tokenInfo.paths) {
+      for (const tokenPath of config.authPaths) {
         if (fs.existsSync(tokenPath)) {
-          // Remove directory recursively or file
           fs.rmSync(tokenPath, { recursive: true, force: true });
           deleted++;
         }
@@ -313,17 +221,17 @@ export function clearAuthTokens(service: string): { success: boolean; message: s
       if (deleted > 0) {
         return {
           success: true,
-          message: `Cleared credentials for ${info.displayName}. Browser will open on next use.`
+          message: `Cleared credentials for ${config.displayName}. Browser will open on next use.`
         };
       } else {
         return {
           success: true,
-          message: `No cached credentials found for ${info.displayName}`
+          message: `No cached credentials found for ${config.displayName}`
         };
       }
     }
 
-    return { success: false, message: `Unexpected token type for ${service}` };
+    return { success: false, message: `No re-auth method configured for ${config.displayName}` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, message: `Failed to clear tokens: ${message}` };
@@ -334,5 +242,28 @@ export function clearAuthTokens(service: string): { success: boolean; message: s
  * List services that support re-authentication
  */
 export function listReauthServices(): string[] {
-  return Object.keys(TOKEN_PATHS);
+  return getAllMcpServerConfigs()
+    .filter(c => c.authType === 'mcp-remote' || c.authType === 'auto')
+    .map(c => c.name);
 }
+
+/**
+ * Re-export MCP_AUTH_INFO for backwards compatibility
+ * (maps to registry configs)
+ */
+export const MCP_AUTH_INFO: Record<string, {
+  displayName: string;
+  authType: 'mcp-remote' | 'env' | 'auto' | 'none';
+  envVars?: string[];
+  notes?: string;
+}> = Object.fromEntries(
+  getAllMcpServerConfigs().map(c => [
+    c.name,
+    {
+      displayName: c.displayName,
+      authType: c.authType,
+      envVars: c.authEnvVars,
+      notes: c.authNotes,
+    },
+  ])
+);

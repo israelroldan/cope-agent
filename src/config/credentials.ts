@@ -26,6 +26,7 @@ export const KNOWN_CREDENTIALS: Record<string, string> = {
   MAGISTER_SCHOOL: 'Magister school ID (default: sintlucas-vmbo)',
   OMI_API_KEY: 'Omi API key for lifelog MCP',
   GOOGLE_OAUTH_CREDENTIALS: 'Path to Google OAuth credentials JSON',
+  YNAB_API_TOKEN: 'YNAB API token for finance MCP (from Developer Settings)',
 };
 
 /**

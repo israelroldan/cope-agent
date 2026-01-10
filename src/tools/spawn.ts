@@ -15,6 +15,7 @@ import {
   executeMcpToolCall,
   type McpConnection,
 } from '../mcp/client.js';
+import { getMcpServerConfig } from '../mcp/registry.js';
 
 /**
  * Create Anthropic client with support for:
@@ -127,6 +128,20 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
       if (process.env.DEBUG) {
         console.log(`[DEBUG] ${specialist}: Connecting to MCP servers: ${agentDef.mcpServers.join(', ')}`);
       }
+
+      // Check if any servers have slow startup and notify user
+      const slowServers = agentDef.mcpServers.filter(name => {
+        const config = getMcpServerConfig(name);
+        return config?.slowStartup;
+      });
+      if (slowServers.length > 0) {
+        const serverNames = slowServers.map(name => {
+          const config = getMcpServerConfig(name);
+          return config?.displayName || name;
+        }).join(', ');
+        console.log(`  ⏳ Connecting to ${serverNames}...`);
+      }
+
       connections = await connectToMcpServers(agentDef.mcpServers);
 
       if (connections.length === 0 && agentDef.mcpServers.length > 0) {
@@ -322,6 +337,7 @@ Available specialists:
 - lifelog-agent: Omi wearable memories (omi MCP)
 - school-agent: School schedules (magister MCP)
 - miro-agent: Miro boards (miro MCP)
+- finance-agent: Financial coaching and YNAB budget management (ynab MCP)
 - cope-workflow-agent: Multi-domain workflows (spawns sub-specialists)
 
 Use discover_capability first to find the right specialist for a task.`,
@@ -341,6 +357,7 @@ Use discover_capability first to find the right specialist for a task.`,
           'lifelog-agent',
           'school-agent',
           'miro-agent',
+          'finance-agent',
           'cope-workflow-agent',
         ],
       },

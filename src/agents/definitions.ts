@@ -18,6 +18,7 @@ import { lifelogAgent } from './lifelog-agent.js';
 import { schoolAgent } from './school-agent.js';
 import { miroAgent } from './miro-agent.js';
 import { copeWorkflowAgent } from './cope-workflow-agent.js';
+import { financeAgent } from './finance-agent.js';
 
 import type { AgentDefinition } from './types.js';
 
@@ -34,6 +35,7 @@ export const agentDefinitions: Record<string, AgentDefinition> = {
   'school-agent': schoolAgent,
   'miro-agent': miroAgent,
   'cope-workflow-agent': copeWorkflowAgent,
+  'finance-agent': financeAgent,
 };
 
 /**

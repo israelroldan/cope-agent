@@ -8,6 +8,8 @@
  * to ensure dotenv has loaded .env before we read them.
  */
 
+import * as path from 'path';
+
 export interface McpServerConfig {
   name: string;
   description: string;
@@ -17,6 +19,15 @@ export interface McpServerConfig {
   url?: string;
   env?: Record<string, string>;
   headers?: Record<string, string>;
+  // Auth metadata for status display
+  displayName: string;
+  authType: 'mcp-remote' | 'env' | 'auto' | 'none';
+  authEnvVars?: string[];  // For env auth type - vars to check
+  authUrl?: string;        // For mcp-remote - URL for token cache lookup
+  authPaths?: string[];    // For file-based auth - paths to clear
+  authNotes?: string;
+  // UX hints
+  slowStartup?: boolean;   // If true, show "connecting..." message to user
 }
 
 /**
@@ -29,6 +40,7 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
   args?: string[];
   argsBuilder?: () => string[];
   envBuilder?: () => Record<string, string>;
+  authPathsBuilder?: () => string[];
 }> = {
   'gmail-work': {
     name: 'gmail-work',
@@ -36,6 +48,10 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     type: 'npx',
     command: 'npx',
     args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+    displayName: 'Gmail (Work)',
+    authType: 'auto',
+    authPathsBuilder: () => [path.join(process.env.HOME || '', '.gmail-mcp')],
+    authNotes: 'Browser opens on first use',
   },
 
   'slack-tatoma': {
@@ -48,6 +64,9 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
       SLACK_MCP_XOXB_TOKEN: process.env.SLACK_MCP_XOXB_TOKEN ?? '',
       SLACK_MCP_ADD_MESSAGE_TOOL: 'true',
     }),
+    displayName: 'Slack (Tatoma)',
+    authType: 'env',
+    authEnvVars: ['SLACK_MCP_XOXB_TOKEN'],
   },
 
   'google-calendar-work': {
@@ -60,6 +79,10 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
       GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS ??
         '/Users/israel/.config/cope/credentials/google-oauth-work.json',
     }),
+    displayName: 'Google Calendar (Work)',
+    authType: 'auto',
+    authPathsBuilder: () => [path.join(process.env.HOME || '', '.config', 'google-calendar-mcp')],
+    authNotes: 'Browser opens on first use',
   },
 
   'ical-home': {
@@ -68,6 +91,9 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     type: 'uv',
     command: 'uv',
     args: ['--directory', '/Users/israel/code/mcp-ical', 'run', 'mcp-ical'],
+    displayName: 'iCal (Home)',
+    authType: 'none',
+    authNotes: 'Local calendars',
   },
 
   'magister': {
@@ -81,6 +107,9 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
       MAGISTER_USER: process.env.MAGISTER_USER ?? '',
       MAGISTER_PASS: process.env.MAGISTER_PASS ?? '',
     }),
+    displayName: 'Magister (School)',
+    authType: 'env',
+    authEnvVars: ['MAGISTER_USER', 'MAGISTER_PASS'],
   },
 
   'omi': {
@@ -88,7 +117,6 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     description: 'Lifelog via Omi wearable',
     type: 'docker',
     command: 'docker',
-    // Use argsBuilder to inject env var value at runtime
     argsBuilder: () => [
       'run',
       '-i',
@@ -96,17 +124,22 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
       '-e', `OMI_API_KEY=${process.env.OMI_API_KEY ?? ''}`,
       'omiai/mcp-server',
     ],
+    displayName: 'Omi (Lifelog)',
+    authType: 'env',
+    authEnvVars: ['OMI_API_KEY'],
   },
 
   // OAuth-based services use mcp-remote to handle browser auth flow
-  // See: https://developers.notion.com/docs/get-started-with-mcp
   'notion-work': {
     name: 'notion-work',
     description: 'Tatoma work Notion workspace',
     type: 'npx',
     command: 'npx',
     args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp'],
-    // mcp-remote handles OAuth: opens browser on first use, caches token
+    displayName: 'Notion (Work)',
+    authType: 'mcp-remote',
+    authUrl: 'https://mcp.notion.com/mcp',
+    authNotes: 'Browser opens on first use',
   },
 
   'notion-personal': {
@@ -115,7 +148,10 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     type: 'npx',
     command: 'npx',
     args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp'],
-    // mcp-remote handles OAuth: opens browser on first use, caches token
+    displayName: 'Notion (Personal)',
+    authType: 'mcp-remote',
+    authUrl: 'https://mcp.notion.com/mcp',
+    authNotes: 'Browser opens on first use',
   },
 
   'miro': {
@@ -124,7 +160,25 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     type: 'npx',
     command: 'npx',
     args: ['-y', 'mcp-remote', 'https://mcp.miro.com'],
-    // mcp-remote handles OAuth: opens browser on first use, caches token
+    displayName: 'Miro',
+    authType: 'mcp-remote',
+    authUrl: 'https://mcp.miro.com',
+    authNotes: 'Browser opens on first use',
+  },
+
+  'ynab': {
+    name: 'ynab',
+    description: 'YNAB budget management',
+    type: 'node',
+    command: '/Users/israel/code/ynab-mcp-server/.venv/bin/ynab-mcp-server',
+    args: [],
+    envBuilder: () => ({
+      YNAB_API_TOKEN: process.env.YNAB_API_TOKEN ?? '',
+    }),
+    displayName: 'YNAB (Budget)',
+    authType: 'env',
+    authEnvVars: ['YNAB_API_TOKEN'],
+    slowStartup: true,
   },
 };
 
@@ -136,16 +190,32 @@ export function getMcpServerConfig(name: string): McpServerConfig | undefined {
   const staticConfig = staticConfigs[name];
   if (!staticConfig) return undefined;
 
-  // Build env vars and args lazily (now that dotenv has loaded)
-  const { envBuilder, argsBuilder, args, ...rest } = staticConfig;
+  // Build env vars, args, and auth paths lazily (now that dotenv has loaded)
+  const { envBuilder, argsBuilder, authPathsBuilder, args, ...rest } = staticConfig;
   const env = envBuilder ? envBuilder() : {};
   const resolvedArgs = argsBuilder ? argsBuilder() : args;
+  const authPaths = authPathsBuilder ? authPathsBuilder() : rest.authPaths;
 
   return {
     ...rest,
     args: resolvedArgs,
     env,
+    authPaths,
   } as McpServerConfig;
+}
+
+/**
+ * Get all MCP server names
+ */
+export function getAllMcpServerNames(): string[] {
+  return Object.keys(staticConfigs);
+}
+
+/**
+ * Get all MCP server configurations
+ */
+export function getAllMcpServerConfigs(): McpServerConfig[] {
+  return getAllMcpServerNames().map(name => getMcpServerConfig(name)!);
 }
 
 /**

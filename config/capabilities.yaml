@@ -181,6 +181,29 @@ domains:
       - GetBoardDocs
       - CreateDiagram
 
+  finance:
+    description: "Financial coaching and YNAB budget management"
+    triggers:
+      - finance
+      - budget
+      - money
+      - spending
+      - ynab
+      - expenses
+      - savings
+      - accounts
+      - balance
+      - transaction
+      - underfunded
+      - overspent
+    specialist: finance-agent
+    mcp_servers:
+      - ynab
+    workflows:
+      - BudgetReview
+      - LogTransaction
+      - SpendingAnalysis
+
 # Multi-domain workflows
 workflows:
   # Daily workflows
