@@ -170,10 +170,10 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     name: 'ynab',
     description: 'YNAB budget management',
     type: 'node',
-    command: '/Users/israel/code/ynab-mcp-server/.venv/bin/ynab-mcp-server',
+    command: '/Users/israel/code/mcp-ynab/.venv/bin/mcp-ynab',
     args: [],
     envBuilder: () => ({
-      YNAB_API_TOKEN: process.env.YNAB_API_TOKEN ?? '',
+      YNAB_API_KEY: process.env.YNAB_API_TOKEN ?? '',
     }),
     displayName: 'YNAB (Budget)',
     authType: 'env',

@@ -17,6 +17,10 @@ export { weekStartWorkflow, getWeekStartTasks } from './week-start.js';
 export { weekMidWorkflow, getWeekMidTasks } from './week-mid.js';
 export { weekEndWorkflow, getWeekEndTasks } from './week-end.js';
 
+// Finance workflows
+export { budgetReviewWorkflow, getBudgetReviewTasks } from './budget-review.js';
+export { monthCloseWorkflow, getMonthCloseTasks } from './month-close.js';
+
 // COPE phase workflows
 export { clarifyWorkflow } from './clarify.js';
 export { organiseWorkflow } from './organise.js';
@@ -29,6 +33,8 @@ import { dailyCloseWorkflow } from './daily-close.js';
 import { weekStartWorkflow } from './week-start.js';
 import { weekMidWorkflow } from './week-mid.js';
 import { weekEndWorkflow } from './week-end.js';
+import { budgetReviewWorkflow } from './budget-review.js';
+import { monthCloseWorkflow } from './month-close.js';
 import { clarifyWorkflow } from './clarify.js';
 import { organiseWorkflow } from './organise.js';
 import { prioritiseWorkflow } from './prioritise.js';
@@ -43,6 +49,8 @@ export const workflows: Record<string, WorkflowDefinition> = {
   'week-start': weekStartWorkflow,
   'week-mid': weekMidWorkflow,
   'week-end': weekEndWorkflow,
+  'budget-review': budgetReviewWorkflow,
+  'month-close': monthCloseWorkflow,
   'clarify': clarifyWorkflow,
   'organise': organiseWorkflow,
   'prioritise': prioritiseWorkflow,

@@ -297,6 +297,38 @@ workflows:
       - domain: lifelog
         task: "Get week's lifelog summary"
 
+  # Finance workflows
+  budget_review:
+    description: "Weekly budget check-in with spending analysis"
+    triggers:
+      - budget review
+      - weekly budget
+      - how am I spending
+      - budget check
+      - spending review
+      - check my budget
+      - budget status
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: finance
+        task: "Analyze spending vs budget for the week, identify patterns"
+
+  month_close:
+    description: "End-of-month financial review and planning"
+    triggers:
+      - month close
+      - monthly close
+      - end of month
+      - month end review
+      - monthly review
+      - close the month
+      - monthly summary
+      - month end
+    specialist: cope-workflow-agent
+    parallel_tasks:
+      - domain: finance
+        task: "Complete month-end financial close, analyze trends, plan next month"
+
   # COPE thinking phases
   clarify:
     description: "COPE Phase 1 - define the real problem"
