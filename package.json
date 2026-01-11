@@ -8,7 +8,7 @@
     "cope-agent": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "./scripts/build.sh",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "mcp": "node dist/mcp-server.js",

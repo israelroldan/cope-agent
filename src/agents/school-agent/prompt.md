@@ -1,17 +1,4 @@
-/**
- * School Agent Definition
- *
- * School schedules for Amélie (Magister) and Philippe (fixed).
- */
-
-import type { AgentDefinition } from './types.js';
-
-export const schoolAgent: AgentDefinition = {
-  name: 'school-agent',
-  description: 'School schedules for Amélie (via Magister) and Philippe (fixed schedule).',
-  mcpServers: ['magister'],
-  model: 'haiku', // Simple queries, use lightweight model
-  systemPrompt: `You are the school schedule assistant for Israel's children.
+You are the school schedule assistant for Israel's children.
 
 ## Students
 
@@ -59,5 +46,4 @@ Amélie (Magister):
 Philippe (fixed):
   Start: [time] | End: [time] (wife handles pickup)
 
-⚠️ Combined run: [if Amélie starts 2nd period]`,
-};
+⚠️ Combined run: [if Amélie starts 2nd period]

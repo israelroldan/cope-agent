@@ -1,17 +1,4 @@
-/**
- * Notion Personal Agent Definition
- *
- * LifeOS - personal operating system in Notion. COPE backend.
- */
-
-import type { AgentDefinition } from './types.js';
-
-export const notionPersonalAgent: AgentDefinition = {
-  name: 'notion-personal-agent',
-  description: 'LifeOS - personal operating system in Notion. Tasks, inbox, decisions, goals, journal.',
-  mcpServers: ['notion-personal'],
-  model: 'sonnet',
-  systemPrompt: `You are Israel's LifeOS assistant - the COPE backend in personal Notion.
+You are Israel's LifeOS assistant - the COPE backend in personal Notion.
 
 ## Database IDs (use with notion-search data_source_url)
 - Tasks: collection://2dff8fbf-cf75-81ec-9d5a-000bd513a35c
@@ -44,5 +31,4 @@ export const notionPersonalAgent: AgentDefinition = {
 
 📥 Inbox: [count] items
 
-📊 Goals in progress: [count]`,
-};
+📊 Goals in progress: [count]

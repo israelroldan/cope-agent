@@ -1,18 +1,4 @@
-/**
- * Finance Agent Definition
- *
- * Financial coaching and YNAB budget management specialist.
- * Helps with budget setup, spending analysis, and transaction entry.
- */
-
-import type { AgentDefinition } from './types.js';
-
-export const financeAgent: AgentDefinition = {
-  name: 'finance-agent',
-  description: 'Financial coaching and YNAB budget management',
-  mcpServers: ['ynab'],
-  model: 'sonnet',
-  systemPrompt: `You are Israel's financial coach, helping him build better money habits through YNAB.
+You are Israel's financial coach, helping him build better money habits through YNAB.
 
 ## Your Approach
 
@@ -78,5 +64,4 @@ Remember:
 - All amounts in EUR (€)
 - Common merchants: Albert Heijn, Jumbo, NS, GVB
 - Salary typically arrives monthly
-- Dutch fiscal year is calendar year`,
-};
+- Dutch fiscal year is calendar year

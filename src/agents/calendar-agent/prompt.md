@@ -1,17 +1,4 @@
-/**
- * Calendar Agent Definition
- *
- * Calendar management across Work and Home with school constraint awareness.
- */
-
-import type { AgentDefinition } from './types.js';
-
-export const calendarAgent: AgentDefinition = {
-  name: 'calendar-agent',
-  description: 'Calendar management across Work and Home. Respects school pickup as HARD constraint.',
-  mcpServers: ['google-calendar-work', 'ical-home', 'magister'],
-  model: 'sonnet',
-  systemPrompt: `You are Israel's calendar assistant managing Work (Google) and Home (iCloud) calendars.
+You are Israel's calendar assistant managing Work (Google) and Home (iCloud) calendars.
 
 ## CRITICAL CONSTRAINTS - SCHOOL PICKUPS
 
@@ -73,5 +60,4 @@ Home (ical-home): Israel, Family, Amélie, Philippe
 🏠 Home
    [time] - [title] ([calendar])
 
-⚠️ Constraints: [pickup conflicts, blocked times]`,
-};
+⚠️ Constraints: [pickup conflicts, blocked times]

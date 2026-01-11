@@ -9,16 +9,16 @@
 
 export type { AgentDefinition } from './types.js';
 
-import { emailAgent } from './email-agent.js';
-import { calendarAgent } from './calendar-agent.js';
-import { slackAgent } from './slack-agent.js';
-import { notionPersonalAgent } from './notion-personal-agent.js';
-import { notionWorkAgent } from './notion-work-agent.js';
-import { lifelogAgent } from './lifelog-agent.js';
-import { schoolAgent } from './school-agent.js';
-import { miroAgent } from './miro-agent.js';
-import { copeWorkflowAgent } from './cope-workflow-agent.js';
-import { financeAgent } from './finance-agent.js';
+import { emailAgent } from './email-agent/index.js';
+import { calendarAgent } from './calendar-agent/index.js';
+import { slackAgent } from './slack-agent/index.js';
+import { notionPersonalAgent } from './notion-personal-agent/index.js';
+import { notionWorkAgent } from './notion-work-agent/index.js';
+import { lifelogAgent } from './lifelog-agent/index.js';
+import { schoolAgent } from './school-agent/index.js';
+import { miroAgent } from './miro-agent/index.js';
+import { copeWorkflowAgent } from './cope-workflow-agent/index.js';
+import { financeAgent } from './finance-agent/index.js';
 
 import type { AgentDefinition } from './types.js';
 
