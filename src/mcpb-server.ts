@@ -15,7 +15,24 @@
  * - No credentials are stored in the bundle itself
  * - Tool execution has configurable timeouts
  * - Errors are sanitized before returning to prevent credential leakage
+ *
+ * IMPORTANT: This server must NOT output anything to stdout/stderr except
+ * valid JSON-RPC messages. All logging is suppressed to avoid breaking
+ * the MCP protocol communication.
  */
+
+// CRITICAL: Suppress ALL console output before importing anything else
+// MCP protocol requires clean stdio - any non-JSON-RPC output breaks it
+const originalConsoleLog = console.log;
+const originalConsoleError = console.error;
+const originalConsoleWarn = console.warn;
+const originalConsoleDebug = console.debug;
+
+// Completely silence console output - MCP uses stdio for protocol
+console.log = () => {};
+console.error = () => {};
+console.warn = () => {};
+console.debug = () => {};
 
 import { config } from 'dotenv';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -35,22 +52,12 @@ import { loadCredentialsIntoEnv } from './config/index.js';
 const SERVER_NAME = 'cope-agent';
 const SERVER_VERSION = '0.1.0';
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes for specialist operations
-const DEBUG = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
 
-/**
- * Log to stderr (stdout is reserved for MCP protocol)
- */
-function log(level: 'info' | 'debug' | 'error' | 'warn', message: string, data?: unknown): void {
-  if (level === 'debug' && !DEBUG) return;
-
-  const timestamp = new Date().toISOString();
-  const prefix = `[${timestamp}] [${SERVER_NAME}] [${level.toUpperCase()}]`;
-
-  if (data !== undefined) {
-    console.error(`${prefix} ${message}`, data);
-  } else {
-    console.error(`${prefix} ${message}`);
-  }
+// Logging is disabled in MCPB mode to keep stdio clean
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function log(_level: 'info' | 'debug' | 'error' | 'warn', _message: string, _data?: unknown): void {
+  // Intentionally empty - MCP protocol requires clean stdio
+  // All output would be interpreted as invalid JSON-RPC messages
 }
 
 /**
@@ -346,9 +353,7 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  log('info', `${SERVER_NAME} MCP server running on stdio`);
-  log('debug', `Debug mode: ${DEBUG}`);
-  log('debug', `Default timeout: ${DEFAULT_TIMEOUT_MS}ms`);
+  // Server started - no logging in MCPB mode
 }
 
 // Run server
