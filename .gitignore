@@ -16,3 +16,7 @@ dist/
 
 # Logs
 *.log
+
+# SSL certificates (generated locally)
+certs/*.pem
+certs/*.key

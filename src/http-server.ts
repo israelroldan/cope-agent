@@ -1,20 +1,30 @@
 #!/usr/bin/env node
 /**
- * COPE Agent HTTP MCP Server
+ * COPE Agent HTTPS MCP Server
  *
- * Runs cope-agent as a local HTTP server that Claude Desktop can connect to
+ * Runs cope-agent as a local HTTPS server that Claude Desktop can connect to
  * via mcp-remote. This allows full access to local MCP servers, OAuth flows,
  * and all specialist agents.
  *
  * Usage:
- *   npm run http-server          # Start on default port 3847
- *   PORT=8080 npm run http-server # Start on custom port
+ *   npm run serve              # Start HTTPS on default port 3847
+ *   PORT=8080 npm run serve    # Start on custom port
+ *
+ * Setup (first time):
+ *   # Install mkcert and generate certificates
+ *   brew install mkcert
+ *   mkcert -install
+ *   cd certs && mkcert localhost 127.0.0.1 ::1
  *
  * Connect from Claude Desktop:
- *   npx mcp-remote http://localhost:3847/mcp
+ *   npx mcp-remote https://localhost:3847/mcp
  */
 
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'http';
+import { createServer as createHttpsServer } from 'https';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -28,15 +38,52 @@ import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
 
+// Get project root directory
+// When running from dist/, go up one level to find project root
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// Go up one level from either dist/ or src/ to get project root
+const PROJECT_ROOT = join(__dirname, '..');
+
 // Configuration
 const SERVER_NAME = 'cope-agent';
 const SERVER_VERSION = '0.1.0';
 const DEFAULT_PORT = 3847;
 const PORT = parseInt(process.env.PORT || String(DEFAULT_PORT), 10);
 
+// Certificate paths
+const CERT_DIR = join(PROJECT_ROOT, 'certs');
+const CERT_FILE = join(CERT_DIR, 'localhost+2.pem');
+const KEY_FILE = join(CERT_DIR, 'localhost+2-key.pem');
+
 // Load credentials
 loadCredentialsIntoEnv();
 config({ quiet: true });
+
+/**
+ * Check if SSL certificates exist
+ */
+function hasSSLCertificates(): boolean {
+  return existsSync(CERT_FILE) && existsSync(KEY_FILE);
+}
+
+/**
+ * Load SSL certificates
+ */
+function loadSSLCertificates(): { cert: Buffer; key: Buffer } | null {
+  if (!hasSSLCertificates()) {
+    return null;
+  }
+  try {
+    return {
+      cert: readFileSync(CERT_FILE),
+      key: readFileSync(KEY_FILE),
+    };
+  } catch (error) {
+    console.error('Failed to load SSL certificates:', error);
+    return null;
+  }
+}
 
 /**
  * Create and configure the MCP server
@@ -130,12 +177,12 @@ const transports = new Map<string, StreamableHTTPServerTransport>();
 /**
  * Handle HTTP requests
  */
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const url = new URL(req.url || '/', `http://localhost:${PORT}`);
+async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol: string): Promise<void> {
+  const url = new URL(req.url || '/', `${protocol}://localhost:${PORT}`);
 
   // CORS headers for mcp-remote
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
   res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
 
@@ -152,7 +199,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       status: 'ok',
       server: SERVER_NAME,
       version: SERVER_VERSION,
-      endpoint: `http://localhost:${PORT}/mcp`,
+      protocol,
+      endpoint: `${protocol}://localhost:${PORT}/mcp`,
     }));
     return;
   }
@@ -161,6 +209,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   if (url.pathname === '/mcp') {
     // Get or create session
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    // Handle DELETE for session cleanup
+    if (req.method === 'DELETE' && sessionId) {
+      if (transports.has(sessionId)) {
+        const transport = transports.get(sessionId)!;
+        await transport.close();
+        transports.delete(sessionId);
+        console.log(`Session deleted: ${sessionId}`);
+        res.writeHead(200).end();
+      } else {
+        res.writeHead(404).end();
+      }
+      return;
+    }
 
     if (req.method === 'GET' || (req.method === 'POST' && !sessionId)) {
       // New session - create transport and server
@@ -210,41 +272,66 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
   res.end(JSON.stringify({ error: 'Not found' }));
 }
 
-// Create HTTP server
-const httpServer = createServer((req, res) => {
-  handleRequest(req, res).catch((error) => {
-    console.error('Request error:', error);
-    if (!res.headersSent) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Internal server error' }));
-    }
-  });
-});
+// Check for SSL certificates
+const sslCerts = loadSSLCertificates();
+const useHttps = sslCerts !== null;
+const protocol = useHttps ? 'https' : 'http';
+
+// Create server (HTTPS if certs available, HTTP otherwise)
+const server = useHttps
+  ? createHttpsServer(sslCerts!, (req, res) => {
+      handleRequest(req, res, 'https').catch((error) => {
+        console.error('Request error:', error);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal server error' }));
+        }
+      });
+    })
+  : createHttpServer((req, res) => {
+      handleRequest(req, res, 'http').catch((error) => {
+        console.error('Request error:', error);
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Internal server error' }));
+        }
+      });
+    });
 
 // Start server
-httpServer.listen(PORT, () => {
+server.listen(PORT, () => {
+  const certStatus = useHttps
+    ? '✅ SSL enabled (mkcert certificates)'
+    : '⚠️  No SSL (run setup below for HTTPS)';
+
   console.log(`
 ┌─────────────────────────────────────────────────┐
-│  COPE Agent HTTP MCP Server                     │
+│  COPE Agent MCP Server                          │
 │  Clarify · Organise · Prioritise · Execute      │
 └─────────────────────────────────────────────────┘
 
-Server running at: http://localhost:${PORT}
-MCP endpoint:      http://localhost:${PORT}/mcp
-Health check:      http://localhost:${PORT}/health
+${certStatus}
+
+Server running at: ${protocol}://localhost:${PORT}
+MCP endpoint:      ${protocol}://localhost:${PORT}/mcp
+Health check:      ${protocol}://localhost:${PORT}/health
 
 To connect from Claude Desktop, add this to your MCP config:
 {
   "mcpServers": {
     "cope-agent": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:${PORT}/mcp"]
+      "args": ["-y", "mcp-remote", "${protocol}://localhost:${PORT}/mcp"]
     }
   }
 }
-
-Or use the MCPB bundle which is pre-configured to connect here.
-
+${!useHttps ? `
+To enable HTTPS (recommended):
+  cd ${CERT_DIR}
+  mkcert -install
+  mkcert localhost 127.0.0.1 ::1
+  # Then restart this server
+` : ''}
 Press Ctrl+C to stop.
 `);
 });
@@ -252,12 +339,12 @@ Press Ctrl+C to stop.
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('\nShutting down...');
-  httpServer.close(() => {
+  server.close(() => {
     console.log('Server stopped.');
     process.exit(0);
   });
 });
 
 process.on('SIGTERM', () => {
-  httpServer.close(() => process.exit(0));
+  server.close(() => process.exit(0));
 });
