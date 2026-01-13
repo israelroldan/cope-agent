@@ -38,6 +38,55 @@ import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
 
+// ============================================================================
+// Debug SSE Infrastructure
+// ============================================================================
+
+interface DebugEvent {
+  timestamp: string;
+  type: 'request' | 'response' | 'session' | 'error';
+  sessionId?: string;
+  method?: string;
+  data?: unknown;
+}
+
+// Connected debug clients
+const debugClients = new Set<ServerResponse>();
+
+/**
+ * Broadcast a debug event to all connected clients
+ */
+function broadcastDebug(event: DebugEvent): void {
+  if (debugClients.size === 0) return;
+
+  const message = `data: ${JSON.stringify(event)}\n\n`;
+
+  for (const client of debugClients) {
+    try {
+      client.write(message);
+    } catch {
+      debugClients.delete(client);
+    }
+  }
+}
+
+/**
+ * Log and broadcast a debug event
+ */
+function debugLog(type: DebugEvent['type'], data: Omit<DebugEvent, 'timestamp' | 'type'>): void {
+  const event: DebugEvent = {
+    timestamp: new Date().toISOString(),
+    type,
+    ...data,
+  };
+
+  // Also log to console for local debugging
+  const emoji = { request: '→', response: '←', session: '◉', error: '✗' }[type];
+  console.log(`[debug] ${emoji} ${type}: ${data.method || data.sessionId || ''}`);
+
+  broadcastDebug(event);
+}
+
 // Get project root directory
 // When running from dist/, go up one level to find project root
 const __filename = fileURLToPath(import.meta.url);
@@ -103,30 +152,33 @@ function createMcpServer(): Server {
 
   // Register tool list handler
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: [
-        {
-          name: 'discover_capability',
-          description: discoverCapabilityTool.description,
-          inputSchema: discoverCapabilityTool.input_schema,
-        },
-        {
-          name: 'spawn_specialist',
-          description: spawnSpecialistTool.description,
-          inputSchema: spawnSpecialistTool.input_schema,
-        },
-        {
-          name: 'spawn_parallel',
-          description: spawnParallelTool.description,
-          inputSchema: spawnParallelTool.input_schema,
-        },
-      ],
-    };
+    debugLog('request', { method: 'tools/list' });
+    const tools = [
+      {
+        name: 'discover_capability',
+        description: discoverCapabilityTool.description,
+        inputSchema: discoverCapabilityTool.input_schema,
+      },
+      {
+        name: 'spawn_specialist',
+        description: spawnSpecialistTool.description,
+        inputSchema: spawnSpecialistTool.input_schema,
+      },
+      {
+        name: 'spawn_parallel',
+        description: spawnParallelTool.description,
+        inputSchema: spawnParallelTool.input_schema,
+      },
+    ];
+    debugLog('response', { method: 'tools/list', data: { count: tools.length } });
+    return { tools };
   });
 
   // Register tool call handler
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+
+    debugLog('request', { method: 'tools/call', data: { tool: name, args } });
 
     try {
       let result: string;
@@ -156,11 +208,17 @@ function createMcpServer(): Server {
           throw new Error(`Unknown tool: ${name}`);
       }
 
+      debugLog('response', {
+        method: 'tools/call',
+        data: { tool: name, resultLength: result.length }
+      });
+
       return {
         content: [{ type: 'text', text: result }],
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      debugLog('error', { method: 'tools/call', data: { tool: name, error: message } });
       return {
         content: [{ type: 'text', text: JSON.stringify({ error: message }) }],
         isError: true,
@@ -174,6 +232,32 @@ function createMcpServer(): Server {
 // Store transports by session ID
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
+// Store servers by session ID (to keep them alive)
+const servers = new Map<string, Server>();
+
+/**
+ * Read and parse request body
+ */
+async function parseRequestBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => {
+      try {
+        const body = Buffer.concat(chunks).toString();
+        if (!body) {
+          resolve(undefined);
+          return;
+        }
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 /**
  * Handle HTTP requests
  */
@@ -183,7 +267,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
   // CORS headers for mcp-remote
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, mcp-session-id, Accept');
   res.setHeader('Access-Control-Expose-Headers', 'mcp-session-id');
 
   // Handle preflight
@@ -201,22 +285,49 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
       version: SERVER_VERSION,
       protocol,
       endpoint: `${protocol}://localhost:${PORT}/mcp`,
+      debug: `${protocol}://localhost:${PORT}/debug`,
     }));
+    return;
+  }
+
+  // Debug SSE endpoint - stream all MCP events
+  if (url.pathname === '/debug') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    // Send initial connection message
+    res.write(`data: ${JSON.stringify({
+      timestamp: new Date().toISOString(),
+      type: 'session',
+      data: { message: 'Debug stream connected', activeSessions: transports.size }
+    })}\n\n`);
+
+    debugClients.add(res);
+    console.log(`[debug] Client connected (${debugClients.size} total)`);
+
+    req.on('close', () => {
+      debugClients.delete(res);
+      console.log(`[debug] Client disconnected (${debugClients.size} remaining)`);
+    });
+
     return;
   }
 
   // MCP endpoint
   if (url.pathname === '/mcp') {
-    // Get or create session
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
     // Handle DELETE for session cleanup
-    if (req.method === 'DELETE' && sessionId) {
-      if (transports.has(sessionId)) {
+    if (req.method === 'DELETE') {
+      if (sessionId && transports.has(sessionId)) {
         const transport = transports.get(sessionId)!;
         await transport.close();
         transports.delete(sessionId);
-        console.log(`Session deleted: ${sessionId}`);
+        servers.delete(sessionId);
+        debugLog('session', { sessionId, data: { action: 'deleted' } });
         res.writeHead(200).end();
       } else {
         res.writeHead(404).end();
@@ -224,46 +335,90 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
       return;
     }
 
-    if (req.method === 'GET' || (req.method === 'POST' && !sessionId)) {
-      // New session - create transport and server
+    // Handle GET for SSE stream (server-to-client notifications)
+    if (req.method === 'GET') {
+      if (sessionId && transports.has(sessionId)) {
+        const transport = transports.get(sessionId)!;
+        await transport.handleRequest(req, res);
+      } else {
+        // No session for GET without session ID - create one for standalone SSE
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+        });
+        const server = createMcpServer();
+        await server.connect(transport);
+
+        if (transport.sessionId) {
+          transports.set(transport.sessionId, transport);
+          servers.set(transport.sessionId, server);
+          debugLog('session', { sessionId: transport.sessionId, data: { action: 'created', type: 'sse' } });
+        }
+
+        transport.onclose = () => {
+          const sid = transport.sessionId;
+          if (sid) {
+            transports.delete(sid);
+            servers.delete(sid);
+            debugLog('session', { sessionId: sid, data: { action: 'closed' } });
+          }
+        };
+
+        await transport.handleRequest(req, res);
+      }
+      return;
+    }
+
+    // Handle POST requests (client-to-server messages)
+    if (req.method === 'POST') {
+      // Parse the request body first
+      let body: unknown;
+      try {
+        body = await parseRequestBody(req);
+      } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+        return;
+      }
+
+      // Check if this is an existing session
+      if (sessionId && transports.has(sessionId)) {
+        const transport = transports.get(sessionId)!;
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+
+      // New session (initialization request)
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
       });
 
       const server = createMcpServer();
+      await server.connect(transport);
 
-      // Store transport
       transport.onclose = () => {
         const sid = transport.sessionId;
         if (sid) {
           transports.delete(sid);
-          console.log(`Session closed: ${sid}`);
+          servers.delete(sid);
+          debugLog('session', { sessionId: sid, data: { action: 'closed' } });
         }
       };
 
-      await server.connect(transport);
+      // Handle the initialization request with the parsed body
+      await transport.handleRequest(req, res, body);
 
-      // Store after connection to get session ID
-      if (transport.sessionId) {
+      // Store session AFTER handleRequest sets the sessionId
+      if (transport.sessionId && !transports.has(transport.sessionId)) {
         transports.set(transport.sessionId, transport);
-        console.log(`New session: ${transport.sessionId}`);
+        servers.set(transport.sessionId, server);
+        debugLog('session', { sessionId: transport.sessionId, data: { action: 'created', type: 'http' } });
       }
-
-      // Handle the request
-      await transport.handleRequest(req, res);
       return;
     }
 
-    // Existing session
-    if (sessionId && transports.has(sessionId)) {
-      const transport = transports.get(sessionId)!;
-      await transport.handleRequest(req, res);
-      return;
-    }
-
-    // Invalid session
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'Session not found' }));
+    // Method not allowed
+    res.writeHead(405, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Method not allowed' }));
     return;
   }
 

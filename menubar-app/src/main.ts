@@ -1,4 +1,4 @@
-import { app, Tray, Menu, nativeImage, shell, dialog, clipboard, Notification, NativeImage } from 'electron';
+import { app, Tray, Menu, nativeImage, shell, dialog, clipboard, Notification, NativeImage, BrowserWindow } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -12,6 +12,7 @@ import AutoLaunch from 'auto-launch';
 let serverProcess: ChildProcess | null = null;
 let tray: Tray | null = null;
 let isServerRunning = false;
+let debugWindow: BrowserWindow | null = null;
 
 // Paths
 const isDev = !app.isPackaged;
@@ -156,6 +157,35 @@ function stopServer(): void {
   }
 }
 
+// Open the debug window
+function openDebugWindow(): void {
+  if (debugWindow) {
+    debugWindow.focus();
+    return;
+  }
+
+  const debugHtmlPath = isDev
+    ? path.join(__dirname, '..', 'assets', 'debug.html')
+    : path.join(resourcesPath, 'assets', 'debug.html');
+
+  debugWindow = new BrowserWindow({
+    width: 800,
+    height: 500,
+    title: 'COPE Agent Debug',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+    backgroundColor: '#1e1e1e',
+  });
+
+  debugWindow.loadFile(debugHtmlPath);
+
+  debugWindow.on('closed', () => {
+    debugWindow = null;
+  });
+}
+
 // Update tray icon and menu
 function updateTrayMenu(): void {
   if (!tray) return;
@@ -218,6 +248,13 @@ function updateTrayMenu(): void {
               body: 'MCP configuration copied to clipboard'
             }).show();
           }
+        }
+      },
+      {
+        label: 'View Debug Log',
+        enabled: isServerRunning,
+        click: () => {
+          openDebugWindow();
         }
       },
       { type: 'separator' },

@@ -130,16 +130,18 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
   },
 
   // OAuth-based services use mcp-remote to handle browser auth flow
+  // NOTE: Each Notion workspace uses a unique query param so mcp-remote
+  // stores separate OAuth tokens for each (tokens are keyed by URL hash)
   'notion-work': {
     name: 'notion-work',
     description: 'Tatoma work Notion workspace',
     type: 'npx',
     command: 'npx',
-    args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp'],
+    args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp?workspace=work'],
     displayName: 'Notion (Work)',
     authType: 'mcp-remote',
-    authUrl: 'https://mcp.notion.com/mcp',
-    authNotes: 'Browser opens on first use',
+    authUrl: 'https://mcp.notion.com/mcp?workspace=work',
+    authNotes: 'Browser opens on first use - authorize WORK workspace',
   },
 
   'notion-personal': {
@@ -147,11 +149,11 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     description: 'Personal Notion workspace (LifeOS)',
     type: 'npx',
     command: 'npx',
-    args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp'],
+    args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp?workspace=personal'],
     displayName: 'Notion (Personal)',
     authType: 'mcp-remote',
-    authUrl: 'https://mcp.notion.com/mcp',
-    authNotes: 'Browser opens on first use',
+    authUrl: 'https://mcp.notion.com/mcp?workspace=personal',
+    authNotes: 'Browser opens on first use - authorize PERSONAL workspace',
   },
 
   'miro': {
