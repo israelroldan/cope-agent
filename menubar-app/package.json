@@ -1,0 +1,75 @@
+{
+  "name": "cope-agent-menubar",
+  "version": "0.1.0",
+  "description": "COPE Agent menubar controller",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "tsc && electron .",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac"
+  },
+  "author": "Israel Roldan",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "sharp": "^0.34.5",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "auto-launch": "^5.0.6",
+    "menubar": "^9.5.0"
+  },
+  "build": {
+    "appId": "com.israelroldan.cope-agent-menubar",
+    "productName": "COPE Agent",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../node_modules",
+        "to": "server-node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../config",
+        "to": "server-config",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../certs",
+        "to": "certs",
+        "filter": [
+          "*.pem"
+        ]
+      }
+    ]
+  }
+}

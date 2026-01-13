@@ -20,7 +20,10 @@
     "typecheck": "tsc --noEmit",
     "bundle": "./scripts/bundle.sh",
     "bundle:clean": "rm -rf bundle cope-agent.mcpb",
-    "bundle:validate": "node scripts/validate-manifest.js"
+    "bundle:validate": "node scripts/validate-manifest.js",
+    "menubar": "cd menubar-app && npm start",
+    "menubar:install": "cd menubar-app && npm install",
+    "menubar:dist": "cd menubar-app && npm run dist:mac"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
