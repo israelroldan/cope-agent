@@ -14,6 +14,23 @@ let tray: Tray | null = null;
 let isServerRunning = false;
 let debugWindow: BrowserWindow | null = null;
 
+// Safe logging that won't crash on EPIPE
+function safeLog(...args: unknown[]): void {
+  try {
+    console.log(...args);
+  } catch {
+    // Ignore EPIPE errors when stdout is closed
+  }
+}
+
+function safeError(...args: unknown[]): void {
+  try {
+    console.error(...args);
+  } catch {
+    // Ignore EPIPE errors when stderr is closed
+  }
+}
+
 // Paths
 const isDev = !app.isPackaged;
 const resourcesPath = isDev
@@ -85,7 +102,7 @@ async function checkServerHealth(): Promise<boolean> {
 // Start the server
 async function startServer(): Promise<void> {
   if (serverProcess) {
-    console.log('Server already running');
+    safeLog('Server already running');
     return;
   }
 
@@ -112,21 +129,21 @@ async function startServer(): Promise<void> {
   });
 
   serverProcess.stdout?.on('data', (data) => {
-    console.log(`[Server] ${data.toString()}`);
+    safeLog(`[Server] ${data.toString()}`);
   });
 
   serverProcess.stderr?.on('data', (data) => {
-    console.error(`[Server Error] ${data.toString()}`);
+    safeError(`[Server Error] ${data.toString()}`);
   });
 
   serverProcess.on('error', (err) => {
-    console.error('Failed to start server:', err);
+    safeError('Failed to start server:', err);
     serverProcess = null;
     updateTrayMenu();
   });
 
   serverProcess.on('exit', (code) => {
-    console.log(`Server exited with code ${code}`);
+    safeLog(`Server exited with code ${code}`);
     serverProcess = null;
     isServerRunning = false;
     updateTrayMenu();
@@ -144,7 +161,7 @@ async function startServer(): Promise<void> {
     attempts++;
   }
 
-  console.error('Server failed to become healthy');
+  safeError('Server failed to become healthy');
 }
 
 // Stop the server
