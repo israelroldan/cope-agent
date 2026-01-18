@@ -204,6 +204,27 @@ domains:
       - LogTransaction
       - SpendingAnalysis
 
+  ics_sync:
+    description: "ICS credit card transaction sync to YNAB"
+    triggers:
+      - ics
+      - icscards
+      - credit card
+      - creditcard
+      - ics sync
+      - sync ics
+      - import ics
+      - credit card sync
+      - sync credit card
+      - import credit card
+      - ics import
+    specialist: ics-sync-agent
+    mcp_servers:
+      - playwright
+      - ynab
+    workflows:
+      - SyncTransactions
+
 # Multi-domain workflows
 workflows:
   # Daily workflows

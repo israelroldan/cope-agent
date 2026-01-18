@@ -19,6 +19,7 @@ import { schoolAgent } from './school-agent/index.js';
 import { miroAgent } from './miro-agent/index.js';
 import { copeWorkflowAgent } from './cope-workflow-agent/index.js';
 import { financeAgent } from './finance-agent/index.js';
+import { icsSyncAgent } from './ics-sync-agent/index.js';
 
 import type { AgentDefinition } from './types.js';
 
@@ -36,6 +37,7 @@ export const agentDefinitions: Record<string, AgentDefinition> = {
   'miro-agent': miroAgent,
   'cope-workflow-agent': copeWorkflowAgent,
   'finance-agent': financeAgent,
+  'ics-sync-agent': icsSyncAgent,
 };
 
 /**

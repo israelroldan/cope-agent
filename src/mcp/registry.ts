@@ -182,6 +182,34 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     authEnvVars: ['YNAB_API_TOKEN'],
     slowStartup: true,
   },
+
+  'playwright': {
+    name: 'playwright',
+    description: 'Browser automation via Playwright',
+    type: 'npx',
+    command: 'npx',
+    args: [
+      '-y', '@playwright/mcp@latest',
+      '--browser', 'chrome',
+      '--user-data-dir', '/Users/israel/.config/cope-agent/ics-browser-profile',
+    ],
+    displayName: 'Playwright (Browser)',
+    authType: 'none',
+    authNotes: 'No auth required - browser handles site logins',
+  },
+
+  'network-monitor': {
+    name: 'network-monitor',
+    description: 'Network request/response capture for browser automation',
+    type: 'npx',
+    command: 'npx',
+    args: [
+      '-y', 'playwright-min-network-mcp',
+    ],
+    displayName: 'Network Monitor',
+    authType: 'none',
+    authNotes: 'Captures XHR/API responses from browser',
+  },
 };
 
 /**

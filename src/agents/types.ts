@@ -8,4 +8,5 @@ export interface AgentDefinition {
   systemPrompt: string;
   mcpServers: string[];
   model: 'haiku' | 'sonnet' | 'opus';
+  maxTurns?: number;  // Override default of 10 for agents that need more iterations
 }

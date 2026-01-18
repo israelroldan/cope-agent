@@ -116,7 +116,7 @@ Microsoft's official Playwright MCP (`@playwright/mcp`) provides browser automat
 Based on research and common patterns:
 
 ```
-https://www.icscards.nl/sca-login
+https://www.icscards.nl/web/consumer/abnamro/sca-login
 ├── Login page
 │   ├── Username/email input
 │   ├── Password input
@@ -171,6 +171,12 @@ const importId = `ICS:${date}:${amount}:${hash(payee).slice(0, 8)}`;
 
 YNAB will reject transactions with duplicate `import_id`, making re-runs safe.
 
+**Note on reserved vs committed transactions:**
+- Reserved transactions may post with a different date when committed
+- This would create a "duplicate" since the import_id differs
+- **By design:** User resolves these in YNAB (merge/delete)
+- Better to have occasional duplicates than miss transactions
+
 ## MCP Registry Addition
 
 Add to `src/mcp/registry.ts`:
@@ -216,7 +222,7 @@ Import transactions from icscards.nl into YNAB. You are NOT a financial coach - 
 ## Workflow
 
 ### Step 1: Open ICS Login
-- Navigate to https://www.icscards.nl/sca-login
+- Navigate to https://www.icscards.nl/web/consumer/abnamro/sca-login
 - Wait for the login page to load
 
 ### Step 2: Guide User Through Login
@@ -304,47 +310,77 @@ ics_sync:
 
 ## Implementation Phases
 
-### Phase 1: Foundation
-- [ ] Add Playwright MCP to registry (`src/mcp/registry.ts`)
-- [ ] Create ics-sync-agent directory structure
-- [ ] Write initial system prompt
-- [ ] Add agent to definitions registry
-- [ ] Add triggers to capabilities.yaml
-- [ ] Test Playwright MCP connection independently
+### Phase 1: Foundation ✅ COMPLETE
+- [x] Add Playwright MCP to registry (`src/mcp/registry.ts`)
+- [x] Create ics-sync-agent directory structure
+- [x] Write initial system prompt
+- [x] Add agent to definitions registry
+- [x] Add triggers to capabilities.yaml
+- [x] Test Playwright MCP connection independently
 
-### Phase 2: ICS Portal Navigation
-- [ ] Research actual ICS portal structure (login flow, pages)
-- [ ] Implement login page navigation
-- [ ] Handle 2FA wait state (detect when user completes it)
-- [ ] Navigate to transactions page
-- [ ] Handle pagination/date filters
+### Phase 2: ICS Portal Navigation ✅ COMPLETE
+- [x] Research actual ICS portal structure (login flow, pages)
+- [x] Implement login page navigation
+- [x] Handle 2FA wait state (detect when user completes it)
+- [x] Navigate to transactions page
+- [ ] Handle pagination/date filters (not needed - current period sufficient)
 
-### Phase 3: Transaction Extraction
-- [ ] Parse transaction table from accessibility tree
-- [ ] Extract date, payee, amount fields
+### Phase 3: Transaction Extraction ✅ COMPLETE
+- [x] Parse transaction table from accessibility tree
+- [x] Extract date, payee, amount fields
 - [ ] Handle edge cases (foreign transactions, pending, etc.)
 - [ ] Implement date range filtering (since last sync)
 
-### Phase 4: YNAB Integration
-- [ ] Discover budget and ICS account
-- [ ] Map ICS transactions to YNAB format
-- [ ] Implement import_id generation for deduplication
-- [ ] Push transactions as unapproved
+### Phase 4: YNAB Integration ✅ COMPLETE
+- [x] Discover budget and ICS account
+- [x] Map ICS transactions to YNAB format
+- [x] Implement import_id generation for deduplication
+- [x] Push transactions as unapproved
+- [x] Fix YNAB MCP to accept transaction_date parameter
+- [x] Add batch import (`create_transactions_batch`) - avoids rate limits!
 - [ ] Handle API errors gracefully
 
-### Phase 5: Polish
+### Phase 5: Polish (OPTIONAL)
 - [ ] Store last sync date for incremental imports
 - [ ] Add session recovery (if browser crashes)
 - [ ] Improve error messages
-- [ ] Test full flow end-to-end
+- [x] Test full flow end-to-end ✅
 - [ ] Document usage in README
 
+## Summary
+
+**Working flow:**
+1. User says "sync my ics"
+2. Browser opens to ICS login page
+3. User logs in + completes 2FA
+4. Agent detects login, navigates to transactions
+5. Agent extracts all transactions from page
+6. Agent batch-imports to YNAB in single API call
+7. Reports: "Imported X transactions (Y duplicates skipped)"
+
+**Key fixes made:**
+- Added `transaction_date` parameter to YNAB MCP (was hardcoded to today)
+- Added `create_transactions_batch` to YNAB MCP (avoids rate limits)
+- Increased `maxTurns` for 2FA polling
+- Fixed trigger matching for "credit card", "ics" keywords
+
 ## Future Enhancements
+
+### Network Request Interception (Speed Optimization)
+- Attempted: `playwright-min-network-mcp` for XHR capture
+- Status: Had compatibility issues, deferred
+- Benefit: Would skip DOM scraping, parse JSON directly
+- See `ideas/improvements.md` for details
 
 ### Scheduled Sync
 - Run sync automatically (daily/weekly)
 - Use persistent browser profile to reduce 2FA frequency
 - Notify user only when new transactions imported
+
+### Background Sync with Progress Updates
+- Run sync in background
+- Show progress: "Importing... 45/83"
+- See `ideas/improvements.md` for details
 
 ### Smart Categorization Pipeline
 After import, automatically trigger finance-agent:
@@ -401,7 +437,7 @@ After sync, verify YNAB balance matches ICS reported balance.
 ## Appendix: Research Links
 
 - [Microsoft Playwright MCP](https://github.com/microsoft/playwright-mcp)
-- [ICS Portal](https://www.icscards.nl/sca-login)
+- [ICS Portal](https://www.icscards.nl/web/consumer/abnamro/sca-login)
 - [ICS-Exporter userscript](https://github.com/IeuanK/ICS-Exporter) - Reference for page structure
 - [ics-cards-downloadstatements](https://github.com/sietsevdschoot/ics-cards-downloadstatements) - API approach reference
 - [YNAB API - Create Transaction](https://api.ynab.com/v1#/Transactions/createTransaction)

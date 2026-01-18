@@ -100,7 +100,7 @@ function getModelId(model: 'haiku' | 'sonnet' | 'opus'): string {
  * and returns the result.
  */
 export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResult> {
-  const { specialist, task, context, maxTurns = 10 } = options;
+  const { specialist, task, context, maxTurns: optionsMaxTurns } = options;
 
   // Get agent definition
   const agentDef = getAgentDefinition(specialist);
@@ -108,9 +108,12 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     return {
       success: false,
       specialist,
-      error: `Unknown specialist: ${specialist}. Available: email-agent, calendar-agent, slack-agent, notion-personal-agent, notion-work-agent, lifelog-agent, school-agent, miro-agent, cope-workflow-agent`,
+      error: `Unknown specialist: ${specialist}. Available: email-agent, calendar-agent, slack-agent, notion-personal-agent, notion-work-agent, lifelog-agent, school-agent, miro-agent, finance-agent, ics-sync-agent, cope-workflow-agent`,
     };
   }
+
+  // Determine max turns: options override > agent config > default 10
+  const maxTurns = optionsMaxTurns ?? agentDef.maxTurns ?? 10;
 
   // Build the prompt for the subagent
   const fullPrompt = context
@@ -338,6 +341,7 @@ Available specialists:
 - school-agent: School schedules (magister MCP)
 - miro-agent: Miro boards (miro MCP)
 - finance-agent: Financial coaching and YNAB budget management (ynab MCP)
+- ics-sync-agent: ICS credit card sync to YNAB (playwright, ynab MCPs)
 - cope-workflow-agent: Multi-domain workflows (spawns sub-specialists)
 
 Use discover_capability first to find the right specialist for a task.`,
@@ -358,6 +362,7 @@ Use discover_capability first to find the right specialist for a task.`,
           'school-agent',
           'miro-agent',
           'finance-agent',
+          'ics-sync-agent',
           'cope-workflow-agent',
         ],
       },
