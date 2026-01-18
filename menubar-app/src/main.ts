@@ -342,6 +342,16 @@ function createTray(): void {
   updateTrayMenu();
 }
 
+// Allow self-signed certificates for localhost (needed for debug window SSE)
+app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+  if (new URL(url).hostname === 'localhost') {
+    event.preventDefault();
+    callback(true);
+  } else {
+    callback(false);
+  }
+});
+
 // Main app initialization
 app.whenReady().then(async () => {
   // Hide dock icon on macOS (menubar apps typically don't show in dock)

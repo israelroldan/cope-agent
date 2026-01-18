@@ -22,6 +22,10 @@ import {
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
+import { getStdioDebugClient } from './debug/index.js';
+
+// Initialize debug client (will POST to HTTP server if available)
+const debug = getStdioDebugClient();
 
 // Load credentials from ~/.config/cope-agent/.env first
 loadCredentialsIntoEnv();
@@ -44,30 +48,33 @@ const server = new Server(
 
 // Register tool list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: 'discover_capability',
-        description: discoverCapabilityTool.description,
-        inputSchema: discoverCapabilityTool.input_schema,
-      },
-      {
-        name: 'spawn_specialist',
-        description: spawnSpecialistTool.description,
-        inputSchema: spawnSpecialistTool.input_schema,
-      },
-      {
-        name: 'spawn_parallel',
-        description: spawnParallelTool.description,
-        inputSchema: spawnParallelTool.input_schema,
-      },
-    ],
-  };
+  debug.log('request', { method: 'tools/list' });
+  const tools = [
+    {
+      name: 'discover_capability',
+      description: discoverCapabilityTool.description,
+      inputSchema: discoverCapabilityTool.input_schema,
+    },
+    {
+      name: 'spawn_specialist',
+      description: spawnSpecialistTool.description,
+      inputSchema: spawnSpecialistTool.input_schema,
+    },
+    {
+      name: 'spawn_parallel',
+      description: spawnParallelTool.description,
+      inputSchema: spawnParallelTool.input_schema,
+    },
+  ];
+  debug.log('response', { method: 'tools/list', data: { count: tools.length } });
+  return { tools };
 });
 
 // Register tool call handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  debug.log('request', { method: 'tools/call', data: { tool: name, args } });
 
   try {
     let result: string;
@@ -99,6 +106,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
 
+    debug.log('response', { method: 'tools/call', data: { tool: name, resultLength: result.length } });
+
     return {
       content: [
         {
@@ -109,6 +118,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    debug.log('error', { method: 'tools/call', data: { tool: name, error: message } });
     return {
       content: [
         {
@@ -128,6 +138,7 @@ async function main() {
 
   // Log to stderr (stdout is used for MCP protocol)
   console.error('COPE Agent MCP Server running on stdio');
+  debug.log('session', { data: { message: 'stdio server started' } });
 }
 
 main().catch((error) => {

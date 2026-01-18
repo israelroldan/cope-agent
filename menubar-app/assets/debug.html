@@ -91,6 +91,14 @@
     .type.response { color: #4ec9b0; }
     .type.session { color: #dcdcaa; }
     .type.error { color: #f14c4c; }
+    .source {
+      font-size: 10px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-right: 4px;
+    }
+    .source.http { background: #264f78; color: #9cdcfe; }
+    .source.stdio { background: #4d3d00; color: #dcdcaa; }
     .content {
       color: #d4d4d4;
       word-break: break-all;
@@ -152,6 +160,7 @@
       const entry = document.createElement('div');
       entry.className = 'log-entry';
 
+      const sourcePart = event.source ? `<span class="source ${event.source}">${event.source}</span>` : '';
       const methodPart = event.method ? `<span class="method">${event.method}</span>` : '';
       const dataPart = event.data ? `<span class="data">${formatData(event.data)}</span>` : '';
       const sessionPart = event.sessionId ? `[${event.sessionId.slice(0, 8)}]` : '';
@@ -159,7 +168,7 @@
       entry.innerHTML = `
         <span class="timestamp">${formatTime(event.timestamp)}</span>
         <span class="type ${event.type}">${event.type}</span>
-        <span class="content">${sessionPart} ${methodPart} ${dataPart}</span>
+        <span class="content">${sourcePart}${sessionPart} ${methodPart} ${dataPart}</span>
       `;
 
       logContainer.appendChild(entry);

@@ -37,24 +37,21 @@ import { randomUUID } from 'crypto';
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
+import { getHttpDebugClient, DebugEvent, DebugEventType } from './debug/index.js';
 
 // ============================================================================
 // Debug SSE Infrastructure
 // ============================================================================
 
-interface DebugEvent {
-  timestamp: string;
-  type: 'request' | 'response' | 'session' | 'error';
-  sessionId?: string;
-  method?: string;
-  data?: unknown;
-}
-
-// Connected debug clients
+// Connected SSE debug clients
 const debugClients = new Set<ServerResponse>();
 
+// Initialize debug client with direct broadcast
+const debugClient = getHttpDebugClient();
+debugClient.setDirectBroadcast(broadcastDebug);
+
 /**
- * Broadcast a debug event to all connected clients
+ * Broadcast a debug event to all connected SSE clients
  */
 function broadcastDebug(event: DebugEvent): void {
   if (debugClients.size === 0) return;
@@ -73,18 +70,8 @@ function broadcastDebug(event: DebugEvent): void {
 /**
  * Log and broadcast a debug event
  */
-function debugLog(type: DebugEvent['type'], data: Omit<DebugEvent, 'timestamp' | 'type'>): void {
-  const event: DebugEvent = {
-    timestamp: new Date().toISOString(),
-    type,
-    ...data,
-  };
-
-  // Also log to console for local debugging
-  const emoji = { request: '→', response: '←', session: '◉', error: '✗' }[type];
-  console.log(`[debug] ${emoji} ${type}: ${data.method || data.sessionId || ''}`);
-
-  broadcastDebug(event);
+function debugLog(type: DebugEventType, data: Omit<DebugEvent, 'timestamp' | 'type' | 'source'>): void {
+  debugClient.log(type, data);
 }
 
 // Get project root directory
@@ -290,8 +277,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
     return;
   }
 
-  // Debug SSE endpoint - stream all MCP events
+  // Debug endpoint - SSE stream (GET) and event ingestion (POST)
   if (url.pathname === '/debug') {
+    // POST: Accept debug events from other processes (e.g., stdio MCP server, CLI, agents)
+    if (req.method === 'POST') {
+      try {
+        const body = await parseRequestBody(req) as DebugEvent;
+        if (body && body.type && body.timestamp && body.category && body.source) {
+          broadcastDebug(body);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid debug event - requires type, timestamp, category, source' }));
+        }
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+      return;
+    }
+
+    // GET: SSE stream for debug clients
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -301,7 +308,9 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
     // Send initial connection message
     res.write(`data: ${JSON.stringify({
       timestamp: new Date().toISOString(),
+      category: 'system',
       type: 'session',
+      source: 'http',
       data: { message: 'Debug stream connected', activeSessions: transports.size }
     })}\n\n`);
 

@@ -10,6 +10,10 @@ import { getOrchestratorSystemPrompt, getTimeBasedPrompt } from './core/identity
 import { getCapabilitySummary } from './core/manifest.js';
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool, spawnSpecialist, spawnParallel } from './tools/spawn.js';
+import { getAgentDebugClient } from './debug/index.js';
+
+// Debug client for orchestrator events
+const debug = getAgentDebugClient();
 
 /**
  * Create Anthropic client with support for:
@@ -201,6 +205,9 @@ export class CopeAgent {
     // Add user message to history
     this.messages.push({ role: 'user', content: userMessage });
 
+    // Debug: orchestrator starting
+    debug.orchestratorStart(userMessage);
+
     if (process.env.DEBUG) {
       console.log(`[DEBUG] chat() called, message count: ${this.messages.length}`);
     }
@@ -210,6 +217,9 @@ export class CopeAgent {
 
     while (turnCount < maxTurns) {
       turnCount++;
+
+      // Debug: orchestrator turn
+      debug.orchestratorTurn(turnCount, maxTurns);
 
       if (process.env.DEBUG) {
         console.log(`[DEBUG] Turn ${turnCount}/${maxTurns}, messages: ${this.messages.length}`);
