@@ -7,6 +7,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { randomUUID } from 'crypto';
 import { getAgentDefinition } from '../agents/definitions.js';
 import {
   connectToMcpServers,
@@ -16,6 +17,10 @@ import {
   type McpConnection,
 } from '../mcp/client.js';
 import { getMcpServerConfig } from '../mcp/registry.js';
+import { getAgentDebugClient } from '../debug/index.js';
+
+// Debug client for specialist events
+const debug = getAgentDebugClient();
 
 /**
  * Create Anthropic client with support for:
@@ -62,6 +67,8 @@ export interface SpawnOptions {
   context?: string;
   timeout?: number;
   maxTurns?: number;
+  /** Parent request ID for tree hierarchy in debug panel */
+  parentRequestId?: string;
 }
 
 export interface SpawnResult {
@@ -100,11 +107,18 @@ function getModelId(model: 'haiku' | 'sonnet' | 'opus'): string {
  * and returns the result.
  */
 export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResult> {
-  const { specialist, task, context, maxTurns: optionsMaxTurns } = options;
+  const { specialist, task, context, maxTurns: optionsMaxTurns, parentRequestId } = options;
+
+  // Generate unique request ID for this specialist
+  const requestId = randomUUID();
+
+  // Debug: specialist spawn
+  debug.specialistSpawn(requestId, parentRequestId || '', specialist, task);
 
   // Get agent definition
   const agentDef = getAgentDefinition(specialist);
   if (!agentDef) {
+    debug.specialistError(requestId, specialist, `Unknown specialist: ${specialist}`);
     return {
       success: false,
       specialist,
@@ -178,6 +192,9 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     while (turnCount < maxTurns) {
       turnCount++;
 
+      // Debug: specialist turn
+      debug.specialistTurn(requestId, specialist, turnCount, maxTurns);
+
       if (process.env.DEBUG) {
         console.log(`[DEBUG] ${specialist}: Turn ${turnCount}/${maxTurns}`);
       }
@@ -206,6 +223,9 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
         );
         const responseText = textBlock?.text || '';
 
+        // Debug: specialist complete
+        debug.specialistComplete(requestId, specialist, true, { input: totalInputTokens, output: totalOutputTokens });
+
         return {
           success: true,
           specialist,
@@ -222,6 +242,9 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const toolUse of toolUseBlocks) {
+        // Debug: specialist tool call
+        debug.specialistToolCall(requestId, specialist, toolUse.name, toolUse.input);
+
         if (process.env.DEBUG) {
           console.log(`[DEBUG] ${specialist}: Executing tool ${toolUse.name}`);
         }
@@ -233,6 +256,9 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
           toolUse.name,
           toolUse.input as Record<string, unknown>
         );
+
+        // Debug: specialist tool result
+        debug.specialistToolResult(requestId, specialist, toolUse.name, result);
 
         toolResults.push({
           type: 'tool_result',
@@ -255,6 +281,7 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     }
 
     // Max turns reached
+    debug.specialistError(requestId, specialist, `Max turns (${maxTurns}) reached without completion`);
     return {
       success: false,
       specialist,
@@ -278,6 +305,9 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     } else {
       errorMessage = String(error);
     }
+
+    // Debug: specialist error
+    debug.specialistError(requestId, specialist, errorMessage);
 
     return {
       success: false,
@@ -308,13 +338,15 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
  * concurrently.
  */
 export async function spawnParallel(
-  tasks: Array<{ specialist: string; task: string; context?: string }>
+  tasks: Array<{ specialist: string; task: string; context?: string }>,
+  parentRequestId?: string
 ): Promise<SpawnResult[]> {
   const promises = tasks.map(task =>
     spawnSpecialist({
       specialist: task.specialist,
       task: task.task,
       context: task.context,
+      parentRequestId,
     })
   );
 

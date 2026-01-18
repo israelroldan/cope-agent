@@ -106,7 +106,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
 
-    debug.log('response', { method: 'tools/call', data: { tool: name, resultLength: result.length } });
+    debug.log('response', {
+      method: 'tools/call',
+      data: {
+        tool: name,
+        resultLength: result.length,
+        result: result.length > 10000 ? result.substring(0, 10000) + '...[truncated]' : result,
+      }
+    });
 
     return {
       content: [

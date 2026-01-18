@@ -50,6 +50,10 @@ export interface DebugEvent {
   specialist?: string;
   /** Session or request ID for correlation */
   sessionId?: string;
+  /** Unique ID for this request/operation (for tree grouping) */
+  requestId?: string;
+  /** Parent request ID (for tree hierarchy) */
+  parentRequestId?: string;
   /** Method or operation name */
   method?: string;
   /** Additional data */
@@ -106,14 +110,19 @@ export class DebugClient {
    */
   log(
     type: DebugEventType,
-    data: Omit<DebugEvent, 'timestamp' | 'type' | 'source'> & { category?: DebugCategory }
+    data: Partial<Omit<DebugEvent, 'timestamp' | 'type' | 'source'>> = {}
   ): void {
     const event: DebugEvent = {
       timestamp: new Date().toISOString(),
       category: data.category ?? this.defaultCategory,
       type,
       source: this.source,
-      ...data,
+      specialist: data.specialist,
+      sessionId: data.sessionId,
+      requestId: data.requestId,
+      parentRequestId: data.parentRequestId,
+      method: data.method,
+      data: data.data,
     };
 
     // Console logging (condensed format)
@@ -143,64 +152,84 @@ export class DebugClient {
    */
 
   /** Log orchestrator starting to process a user message */
-  orchestratorStart(message: string): void {
+  orchestratorStart(requestId: string, message: string): void {
     this.log('request', {
       category: 'orchestrator',
+      requestId,
       method: 'chat',
-      data: { messageLength: message.length },
+      data: {
+        messageLength: message.length,
+        message: message.length > 10000 ? message.substring(0, 10000) + '...[truncated]' : message,
+      },
     });
   }
 
   /** Log orchestrator turn */
-  orchestratorTurn(turn: number, maxTurns: number): void {
+  orchestratorTurn(requestId: string, turn: number, maxTurns: number): void {
     this.log('turn', {
       category: 'orchestrator',
+      requestId,
       method: 'chat',
       data: { turn, maxTurns },
     });
   }
 
   /** Log orchestrator tool call */
-  orchestratorToolCall(toolName: string, input: unknown): void {
+  orchestratorToolCall(requestId: string, toolName: string, input: unknown): void {
     this.log('tool_call', {
       category: 'orchestrator',
+      requestId,
       method: toolName,
       data: { input },
     });
   }
 
   /** Log orchestrator tool result */
-  orchestratorToolResult(toolName: string, resultLength: number): void {
+  orchestratorToolResult(requestId: string, toolName: string, result: string): void {
     this.log('tool_result', {
       category: 'orchestrator',
+      requestId,
       method: toolName,
-      data: { resultLength },
+      data: {
+        resultLength: result.length,
+        result: result.length > 10000 ? result.substring(0, 10000) + '...[truncated]' : result,
+      },
     });
   }
 
   /** Log orchestrator response complete */
-  orchestratorComplete(responseLength: number): void {
+  orchestratorComplete(requestId: string, response: string): void {
     this.log('response', {
       category: 'orchestrator',
+      requestId,
       method: 'chat',
-      data: { responseLength },
+      data: {
+        responseLength: response.length,
+        response: response.length > 10000 ? response.substring(0, 10000) + '...[truncated]' : response,
+      },
     });
   }
 
   /** Log specialist spawn */
-  specialistSpawn(specialist: string, task: string): void {
+  specialistSpawn(requestId: string, parentRequestId: string, specialist: string, task: string): void {
     this.log('spawn', {
       category: 'specialist',
+      requestId,
+      parentRequestId,
       specialist,
       method: 'spawn',
-      data: { taskLength: task.length },
+      data: {
+        taskLength: task.length,
+        task: task.length > 10000 ? task.substring(0, 10000) + '...[truncated]' : task,
+      },
     });
   }
 
   /** Log specialist turn */
-  specialistTurn(specialist: string, turn: number, maxTurns: number): void {
+  specialistTurn(requestId: string, specialist: string, turn: number, maxTurns: number): void {
     this.log('turn', {
       category: 'specialist',
+      requestId,
       specialist,
       method: 'turn',
       data: { turn, maxTurns },
@@ -208,29 +237,35 @@ export class DebugClient {
   }
 
   /** Log specialist MCP tool call */
-  specialistToolCall(specialist: string, toolName: string, input: unknown): void {
+  specialistToolCall(requestId: string, specialist: string, toolName: string, input: unknown): void {
     this.log('tool_call', {
       category: 'tool',
+      requestId,
       specialist,
       method: toolName,
-      data: typeof input === 'object' ? { keys: Object.keys(input as object) } : {},
+      data: { input },
     });
   }
 
   /** Log specialist MCP tool result */
-  specialistToolResult(specialist: string, toolName: string, resultLength: number): void {
+  specialistToolResult(requestId: string, specialist: string, toolName: string, result: string): void {
     this.log('tool_result', {
       category: 'tool',
+      requestId,
       specialist,
       method: toolName,
-      data: { resultLength },
+      data: {
+        resultLength: result.length,
+        result: result.length > 10000 ? result.substring(0, 10000) + '...[truncated]' : result,
+      },
     });
   }
 
   /** Log specialist complete */
-  specialistComplete(specialist: string, success: boolean, tokensUsed?: { input: number; output: number }): void {
+  specialistComplete(requestId: string, specialist: string, success: boolean, tokensUsed?: { input: number; output: number }): void {
     this.log('response', {
       category: 'specialist',
+      requestId,
       specialist,
       method: 'complete',
       data: { success, tokensUsed },
@@ -238,9 +273,10 @@ export class DebugClient {
   }
 
   /** Log specialist error */
-  specialistError(specialist: string, error: string): void {
+  specialistError(requestId: string, specialist: string, error: string): void {
     this.log('error', {
       category: 'specialist',
+      requestId,
       specialist,
       method: 'error',
       data: { error },

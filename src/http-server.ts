@@ -37,7 +37,8 @@ import { randomUUID } from 'crypto';
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
-import { getHttpDebugClient, DebugEvent, DebugEventType } from './debug/index.js';
+import { getHttpDebugClient } from './debug/index.js';
+import type { DebugEvent, DebugEventType } from './debug/index.js';
 
 // ============================================================================
 // Debug SSE Infrastructure
@@ -70,7 +71,7 @@ function broadcastDebug(event: DebugEvent): void {
 /**
  * Log and broadcast a debug event
  */
-function debugLog(type: DebugEventType, data: Omit<DebugEvent, 'timestamp' | 'type' | 'source'>): void {
+function debugLog(type: DebugEventType, data: Partial<Omit<DebugEvent, 'timestamp' | 'type' | 'source'>> = {}): void {
   debugClient.log(type, data);
 }
 
@@ -197,7 +198,11 @@ function createMcpServer(): Server {
 
       debugLog('response', {
         method: 'tools/call',
-        data: { tool: name, resultLength: result.length }
+        data: {
+          tool: name,
+          resultLength: result.length,
+          result: result.length > 10000 ? result.substring(0, 10000) + '...[truncated]' : result,
+        }
       });
 
       return {

@@ -6,6 +6,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { randomUUID } from 'crypto';
 import { getOrchestratorSystemPrompt, getTimeBasedPrompt } from './core/identity.js';
 import { getCapabilitySummary } from './core/manifest.js';
 import { discoverCapabilityTool } from './tools/discover.js';
@@ -141,7 +142,8 @@ const orchestratorTools: Anthropic.Tool[] = [
  */
 async function executeTool(
   toolName: string,
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, unknown>,
+  parentRequestId: string
 ): Promise<string> {
   switch (toolName) {
     case 'discover_capability':
@@ -151,17 +153,22 @@ async function executeTool(
         target?: string;
       });
 
-    case 'spawn_specialist':
-      return await spawnSpecialistTool.execute(toolInput as {
-        specialist: string;
-        task: string;
-        context?: string;
+    case 'spawn_specialist': {
+      const args = toolInput as { specialist: string; task: string; context?: string };
+      const result = await spawnSpecialist({
+        specialist: args.specialist,
+        task: args.task,
+        context: args.context,
+        parentRequestId,
       });
+      return JSON.stringify(result, null, 2);
+    }
 
-    case 'spawn_parallel':
-      return await spawnParallelTool.execute(toolInput as {
-        tasks: Array<{ specialist: string; task: string; context?: string }>;
-      });
+    case 'spawn_parallel': {
+      const args = toolInput as { tasks: Array<{ specialist: string; task: string; context?: string }> };
+      const results = await spawnParallel(args.tasks, parentRequestId);
+      return JSON.stringify(results, null, 2);
+    }
 
     default:
       return JSON.stringify({ error: `Unknown tool: ${toolName}` });
@@ -202,14 +209,17 @@ export class CopeAgent {
    * Process a user message and return response
    */
   async chat(userMessage: string): Promise<string> {
+    // Generate unique request ID for this orchestrator request
+    const requestId = randomUUID();
+
     // Add user message to history
     this.messages.push({ role: 'user', content: userMessage });
 
     // Debug: orchestrator starting
-    debug.orchestratorStart(userMessage);
+    debug.orchestratorStart(requestId, userMessage);
 
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] chat() called, message count: ${this.messages.length}`);
+      console.log(`[DEBUG] chat() called, requestId: ${requestId}, message count: ${this.messages.length}`);
     }
 
     let turnCount = 0;
@@ -219,7 +229,7 @@ export class CopeAgent {
       turnCount++;
 
       // Debug: orchestrator turn
-      debug.orchestratorTurn(turnCount, maxTurns);
+      debug.orchestratorTurn(requestId, turnCount, maxTurns);
 
       if (process.env.DEBUG) {
         console.log(`[DEBUG] Turn ${turnCount}/${maxTurns}, messages: ${this.messages.length}`);
@@ -257,6 +267,9 @@ export class CopeAgent {
         // Add to history (store full content for API compatibility)
         this.messages.push({ role: 'assistant', content: response.content });
 
+        // Debug: orchestrator complete
+        debug.orchestratorComplete(requestId, assistantMessage);
+
         if (process.env.DEBUG) {
           console.log(`[DEBUG] No tool use, returning response. Total messages: ${this.messages.length}`);
         }
@@ -270,12 +283,19 @@ export class CopeAgent {
       for (const toolUse of toolUseBlocks) {
         if (toolUse.type !== 'tool_use') continue;
 
+        // Debug: orchestrator tool call
+        debug.orchestratorToolCall(requestId, toolUse.name, toolUse.input);
+
         this.options.onToolUse?.(toolUse.name, toolUse.input);
 
         const result = await executeTool(
           toolUse.name,
-          toolUse.input as Record<string, unknown>
+          toolUse.input as Record<string, unknown>,
+          requestId
         );
+
+        // Debug: orchestrator tool result
+        debug.orchestratorToolResult(requestId, toolUse.name, result);
 
         this.options.onToolResult?.(toolUse.name, result);
 

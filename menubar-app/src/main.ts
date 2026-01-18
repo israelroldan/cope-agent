@@ -185,6 +185,18 @@ function openDebugWindow(): void {
     ? path.join(__dirname, '..', 'assets', 'debug.html')
     : path.join(resourcesPath, 'assets', 'debug.html');
 
+  // Show dock icon so window appears in Cmd+Tab
+  if (process.platform === 'darwin') {
+    app.dock?.show();
+    // Set dock icon if available
+    const dockIconPath = isDev
+      ? path.join(__dirname, '..', 'assets', 'AppIcon.png')
+      : path.join(resourcesPath, 'assets', 'AppIcon.png');
+    if (fs.existsSync(dockIconPath)) {
+      app.dock?.setIcon(dockIconPath);
+    }
+  }
+
   debugWindow = new BrowserWindow({
     width: 800,
     height: 500,
@@ -192,6 +204,7 @@ function openDebugWindow(): void {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false, // Allow self-signed certs for localhost SSE
     },
     backgroundColor: '#1e1e1e',
   });
@@ -200,6 +213,10 @@ function openDebugWindow(): void {
 
   debugWindow.on('closed', () => {
     debugWindow = null;
+    // Hide dock icon again when debug window is closed
+    if (process.platform === 'darwin') {
+      app.dock?.hide();
+    }
   });
 }
 
@@ -354,6 +371,12 @@ app.on('certificate-error', (event, _webContents, url, _error, _certificate, cal
 
 // Main app initialization
 app.whenReady().then(async () => {
+  // Allow self-signed certs for EventSource (SSE) connections
+  const { session } = require('electron');
+  session.defaultSession.setCertificateVerifyProc((_request: unknown, callback: (result: number) => void) => {
+    callback(0); // 0 = success, accept all certs for localhost debug
+  });
+
   // Hide dock icon on macOS (menubar apps typically don't show in dock)
   if (process.platform === 'darwin') {
     app.dock?.hide();
