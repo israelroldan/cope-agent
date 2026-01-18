@@ -82,6 +82,7 @@ domains:
       - ChannelCatchup
       - CommitmentScan
 
+  # Source of truth for LifeOS database IDs and schemas: src/config/lifeos-schema.ts
   notion_personal:
     description: "LifeOS - personal operating system in Notion"
     triggers:
