@@ -9,4 +9,5 @@ export interface AgentDefinition {
   mcpServers: string[];
   model: 'haiku' | 'sonnet' | 'opus';
   maxTurns?: number;  // Override default of 10 for agents that need more iterations
+  utilityTools?: string[];  // Built-in utility tools: 'count_items', 'extract_number'
 }

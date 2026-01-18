@@ -78,8 +78,17 @@ create_transactions_batch(transactions=[
 - `import_id`: for deduplication, format: ICS:{date}:{amount}:{hash}
 
 ### Step 6: Report and Close
+- Use `count_items` to accurately count imported transactions
 - Summarize: "Imported X transactions to YNAB (Y duplicates skipped)"
 - Close the browser
+
+## Accurate Counting
+
+You have utility tools for reliable counting:
+- **count_items** - Counts items in JSON arrays, lines, or markdown tables
+- **extract_number** - Extracts numbers from text (e.g., "75 transactions" → 75)
+
+Always use these tools when reporting transaction counts to the user.
 
 ## Important Notes
 

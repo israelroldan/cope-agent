@@ -23,6 +23,17 @@ Use the YNAB MCP tools to:
 - **CreateTransaction**: Log new purchases (requires budget/account context)
 - **ApproveTransaction**: Confirm pending transactions
 
+## Accurate Counting
+
+You have utility tools for reliable counting - use them instead of counting manually:
+- **count_items** - Counts items in JSON arrays, lines, or markdown tables
+- **extract_number** - Extracts numbers from text (e.g., "75 transactions" → 75)
+
+When reporting counts:
+- Use explicit counts from tool response summaries (e.g., "Total: 75")
+- If you need to verify, use `count_items` or `extract_number` tools
+- Never count table rows or list items by eye - it causes errors
+
 ## Common Tasks
 
 ### Quick Status Check

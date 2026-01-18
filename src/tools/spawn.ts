@@ -18,6 +18,11 @@ import {
 } from '../mcp/client.js';
 import { getMcpServerConfig } from '../mcp/registry.js';
 import { getAgentDebugClient } from '../debug/index.js';
+import {
+  getUtilityTools,
+  utilityToolsToAnthropicTools,
+  executeUtilityTool,
+} from './utilities.js';
 
 // Debug client for specialist events
 const debug = getAgentDebugClient();
@@ -172,10 +177,19 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     }
 
     // Get tools from MCP servers
-    const tools = mcpToolsToAnthropicTools(connections);
+    const mcpTools = mcpToolsToAnthropicTools(connections);
+
+    // Get utility tools if defined for this agent
+    const agentUtilityTools = agentDef.utilityTools
+      ? getUtilityTools(agentDef.utilityTools)
+      : [];
+    const utilityToolsForApi = utilityToolsToAnthropicTools(agentUtilityTools);
+
+    // Combine all tools
+    const tools = [...mcpTools, ...utilityToolsForApi];
 
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${specialist}: ${tools.length} tools available`);
+      console.log(`[DEBUG] ${specialist}: ${tools.length} tools available (${mcpTools.length} MCP, ${utilityToolsForApi.length} utility)`);
     }
 
     // Initialize conversation
@@ -251,11 +265,20 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
 
         toolsUsed.push(toolUse.name);
 
-        const result = await executeMcpToolCall(
-          connections,
+        // Try utility tool first, then MCP
+        let result = executeUtilityTool(
           toolUse.name,
           toolUse.input as Record<string, unknown>
         );
+
+        if (result === null) {
+          // Not a utility tool, try MCP
+          result = await executeMcpToolCall(
+            connections,
+            toolUse.name,
+            toolUse.input as Record<string, unknown>
+          );
+        }
 
         // Debug: specialist tool result
         debug.specialistToolResult(requestId, specialist, toolUse.name, result);
