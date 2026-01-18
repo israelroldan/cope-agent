@@ -111,6 +111,7 @@ domains:
       - OpenLoops
       - LogDecision
 
+  # Source of truth for Tatoma database IDs and schemas: src/config/tatoma-schema.ts
   notion_work:
     description: "Tatoma work Notion workspace"
     triggers:
@@ -119,9 +120,18 @@ domains:
       - project page
       - wiki
       - work notion
+      - tatoma
+      - clients
+      - partners
+      - playbook
     specialist: notion-work-agent
     mcp_servers:
       - notion-work
+    databases:
+      clients_projects: "1bbbfa85607e81f19c28cc806fe7a6e5"
+      tasks: "1bbbfa85607e80a598cad61fb3bccec1"
+      playbook: "2e1bfa85607e803cb830c771f636cee5"
+      partners_network: "1bbbfa85607e80d697bbf28bcd2e132f"
     workflows:
       - SearchPages
       - ReadPage
