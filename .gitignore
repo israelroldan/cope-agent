@@ -20,3 +20,5 @@ dist/
 # SSL certificates (generated locally)
 certs/*.pem
 certs/*.key
+
+.sanity

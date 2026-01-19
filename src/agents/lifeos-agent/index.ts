@@ -1,7 +1,8 @@
 /**
- * Notion Personal Agent Definition
+ * LifeOS Agent Definition
  *
- * LifeOS - personal operating system in Notion. COPE backend.
+ * Personal operating system for tasks, goals, inbox, and open loops.
+ * Uses Sanity CMS directly (no MCP servers).
  */
 
 import { readFileSync } from 'fs';
@@ -13,9 +14,9 @@ import { config } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const systemPrompt = readFileSync(join(__dirname, 'prompt.md'), 'utf-8');
 
-export const notionPersonalAgent: AgentDefinition = {
-  name: 'notion-personal-agent',
-  description: 'LifeOS - personal operating system in Notion. Tasks, inbox, decisions, goals, journal.',
+export const lifeosAgent: AgentDefinition = {
+  name: 'lifeos-agent',
+  description: 'LifeOS personal operating system. Use for tasks, goals, inbox captures, open loops, and priorities.',
   systemPrompt,
   ...config,
 };

@@ -88,7 +88,7 @@ daily-briefing:
       task: Check inbox, flag VIP emails
     - specialist: slack-agent
       task: Check overnight activity
-    - specialist: notion-personal-agent
+    - specialist: lifeos-agent
       task: Get priorities and open loops
     - specialist: lifelog-agent
       task: Get overnight conversations

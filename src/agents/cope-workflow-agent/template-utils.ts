@@ -6,7 +6,6 @@
 
 import {
   listWorkflows,
-  LIFEOS_DATABASES,
 } from '../../workflows/index.js';
 
 interface TemplateData {
@@ -14,11 +13,6 @@ interface TemplateData {
   WEEKLY_WORKFLOWS: string;
   FINANCE_WORKFLOWS: string;
   COPE_PHASES: string;
-  LIFEOS_TASKS: string;
-  LIFEOS_NOTES: string;
-  LIFEOS_GOALS: string;
-  LIFEOS_JOURNAL: string;
-  LIFEOS_DECISIONS: string;
 }
 
 /**
@@ -58,11 +52,6 @@ export function getTemplateData(): TemplateData {
     WEEKLY_WORKFLOWS: formatWorkflows('weekly'),
     FINANCE_WORKFLOWS: formatFinanceWorkflows,
     COPE_PHASES: formatWorkflows('cope-phase'),
-    LIFEOS_TASKS: LIFEOS_DATABASES.TASKS,
-    LIFEOS_NOTES: LIFEOS_DATABASES.NOTES,
-    LIFEOS_GOALS: LIFEOS_DATABASES.GOALS,
-    LIFEOS_JOURNAL: LIFEOS_DATABASES.JOURNAL,
-    LIFEOS_DECISIONS: LIFEOS_DATABASES.DECISIONS,
   };
 }
 

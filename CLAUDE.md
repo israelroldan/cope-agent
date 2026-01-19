@@ -60,7 +60,7 @@ Defined in `src/agents/`, each has:
 - `mcpServers` - list of required MCP servers
 - `model` - preferred Claude model (haiku/sonnet/opus)
 
-Specialists: `email-agent`, `calendar-agent`, `slack-agent`, `notion-personal-agent`, `notion-work-agent`, `lifelog-agent`, `school-agent`, `miro-agent`, `finance-agent`, `cope-workflow-agent`
+Specialists: `email-agent`, `calendar-agent`, `slack-agent`, `lifeos-agent`, `notion-work-agent`, `lifelog-agent`, `school-agent`, `miro-agent`, `finance-agent`, `cope-workflow-agent`
 
 ### Workflows
 

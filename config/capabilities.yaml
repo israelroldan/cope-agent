@@ -82,34 +82,27 @@ domains:
       - ChannelCatchup
       - CommitmentScan
 
-  # Source of truth for LifeOS database IDs and schemas: src/config/lifeos-schema.ts
-  notion_personal:
-    description: "LifeOS - personal operating system in Notion"
+  # LifeOS - primary personal operating system (Sanity CMS backend)
+  lifeos:
+    description: "LifeOS - personal operating system for tasks, goals, inbox, and open loops"
     triggers:
       - lifeos
-      - tasks
       - inbox
-      - decisions
-      - goals
-      - journal
-      - priorities
-      - open loops
       - capture
+      - open loop
+      - open loops
+      - waiting on
+      - goals
+      - tasks
+      - priorities
       - quick add
-    specialist: notion-personal-agent
-    mcp_servers:
-      - notion-personal
-    databases:
-      tasks: "collection://2dff8fbf-cf75-81ec-9d5a-000bd513a35c"
-      inbox: "collection://2dff8fbf-cf75-8171-b984-000b1a6487f3"
-      decisions: "collection://8df780cc-91fe-4c51-9c59-d8f20c7dbd7b"
-      journal: "collection://2dff8fbf-cf75-816e-8222-000ba6610bff"
-      goals: "collection://2dff8fbf-cf75-811f-a2e7-000b753d5c5a"
+    specialist: lifeos-agent
+    backend: sanity
     workflows:
       - QuickCapture
       - TasksToday
       - OpenLoops
-      - LogDecision
+      - GoalProgress
 
   # Source of truth for Tatoma database IDs and schemas: src/config/tatoma-schema.ts
   notion_work:
@@ -261,8 +254,8 @@ workflows:
         task: "Check inbox, flag VIPs (Sander, Maarten, Thomas)"
       - domain: slack
         task: "Check overnight activity in #founders-talk, #product"
-      - domain: notion_personal
-        task: "Get priorities, open loops, inbox items"
+      - domain: lifeos
+        task: "Get high priority tasks, active goals, and open loops"
       - domain: lifelog
         task: "Get overnight conversations and memories"
 
@@ -278,8 +271,8 @@ workflows:
       - "what'd I do today"
     specialist: cope-workflow-agent
     parallel_tasks:
-      - domain: notion_personal
-        task: "Get today's decisions, completed tasks, open loops"
+      - domain: lifeos
+        task: "Get today's completed tasks, active tasks, and open loops"
       - domain: lifelog
         task: "Get today's lifelog summary"
 
@@ -295,8 +288,8 @@ workflows:
       - set up the week
     specialist: cope-workflow-agent
     parallel_tasks:
-      - domain: notion_personal
-        task: "Get goal progress, open loops, high priority tasks"
+      - domain: lifeos
+        task: "Get goal progress (P1/P2/P3), active open loops, high priority tasks"
       - domain: calendar
         task: "Get week overview, major commitments"
 
@@ -324,8 +317,8 @@ workflows:
       - retrospective
     specialist: cope-workflow-agent
     parallel_tasks:
-      - domain: notion_personal
-        task: "Get completed tasks, decisions, goal progress, carries"
+      - domain: lifeos
+        task: "Get completed tasks, goal progress, and items carrying to next week"
       - domain: lifelog
         task: "Get week's lifelog summary"
 

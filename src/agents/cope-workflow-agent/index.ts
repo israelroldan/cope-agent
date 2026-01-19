@@ -23,4 +23,4 @@ export const copeWorkflowAgent: AgentDefinition = {
 /**
  * Re-export workflows for external use
  */
-export { workflows, listWorkflows, LIFEOS_DATABASES } from '../../workflows/index.js';
+export { workflows, listWorkflows } from '../../workflows/index.js';

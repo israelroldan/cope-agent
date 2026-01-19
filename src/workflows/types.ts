@@ -5,9 +5,6 @@
  * to accomplish complex tasks like daily briefings or weekly reviews.
  */
 
-// Re-export from centralized config for backwards compatibility
-export { LIFEOS_DATABASES } from '../config/lifeos-schema.js';
-
 /**
  * Specialist task definition for parallel spawning
  */

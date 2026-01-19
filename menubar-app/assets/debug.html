@@ -68,6 +68,13 @@
       background: #094771;
       border-color: #1177bb;
     }
+    button.external {
+      background: #2d4a3e;
+      border-color: #3d6a5e;
+    }
+    button.external:hover {
+      background: #3d6a5e;
+    }
 
     /* Filter bar */
     .filter-bar {
@@ -367,6 +374,7 @@
       </div>
       <button onclick="clearLog()">Clear</button>
       <button onclick="reconnect()">Reconnect</button>
+      <button class="external" onclick="openLifeOSStudio()" title="Open LifeOS Studio (Sanity)">LifeOS Studio ↗</button>
     </div>
   </div>
   <div class="filter-bar">
@@ -862,6 +870,21 @@
 
     function reconnect() {
       connect();
+    }
+
+    async function openLifeOSStudio() {
+      // Use IPC to tell main process to start studio (if needed) and open browser
+      if (window.electronAPI && window.electronAPI.openStudio) {
+        try {
+          await window.electronAPI.openStudio();
+        } catch (e) {
+          console.error('Failed to open studio via IPC:', e);
+        }
+      } else {
+        // Fallback if preload not available (shouldn't happen)
+        console.warn('electronAPI not available');
+        window.open('http://localhost:64321', '_blank');
+      }
     }
 
     // Keyboard navigation

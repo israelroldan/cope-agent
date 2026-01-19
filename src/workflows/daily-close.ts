@@ -5,7 +5,6 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
-import { LIFEOS_DATABASES } from './types.js';
 
 /**
  * Get today's date for queries
@@ -18,17 +17,15 @@ function getTodayDate(): string {
  * Generate specialist tasks for daily close
  */
 export function getDailyCloseTasks(): SpecialistTask[] {
-  const today = getTodayDate();
-
   return [
     {
-      specialist: 'notion-personal-agent',
-      task: `Query LifeOS for today's activity:
-1. Decisions logged today from ${LIFEOS_DATABASES.DECISIONS} (filter created_date = ${today})
-2. Tasks completed today from ${LIFEOS_DATABASES.TASKS} (Status = Done, modified today)
-3. Tasks still in progress (Status = In Progress)
-4. Current open loops (Tasks with "Waiting On" property set)
-Return: today's decisions, completed tasks, active tasks, open loops.`,
+      specialist: 'lifeos-agent',
+      task: `Query LifeOS for today's daily close:
+1. Tasks completed today (status: done)
+2. Tasks still in progress (status: in_progress)
+3. Active open loops (status: active)
+4. Unprocessed inbox items (status: unprocessed)
+Return: completed tasks count, active tasks, open loops, inbox count.`,
     },
     {
       specialist: 'lifelog-agent',
@@ -61,14 +58,13 @@ export const dailyCloseWorkflow: WorkflowDefinition = {
 
 1. Spawn specialists to gather today's activity
 2. Present a summary for review
-3. Prompt for any unlogged decisions or new open loops
-4. Optionally create/update the journal entry
+3. Prompt for any new open loops or items to capture
+4. Summarize what was accomplished
 
 ## Data Sources
 
-- Tasks: ${LIFEOS_DATABASES.TASKS}
-- Decisions: ${LIFEOS_DATABASES.DECISIONS}
-- Journal: ${LIFEOS_DATABASES.JOURNAL}
+- Tasks, Goals, Open Loops, Inbox: lifeos-agent (Sanity CMS)
+- Lifelog: lifelog-agent (Omi wearable)
 
 ## Review Process
 
@@ -122,17 +118,18 @@ Say "save to journal" to log this day close.`,
   outputFormat: `🌙 DAILY CLOSE [date]
 
 ✅ COMPLETED TODAY
-   [notion-personal-agent: completed tasks]
+   [lifeos-agent: completed tasks]
 
-📊 STILL IN PROGRESS  
-   [notion-personal-agent: active tasks]
+📊 STILL IN PROGRESS
+   [lifeos-agent: active tasks]
 
 🔄 OPEN LOOPS
-   [notion-personal-agent: waiting on items]
+   [lifeos-agent: active open loops]
 
-📝 DECISIONS LOGGED
-   [notion-personal-agent: today's decisions]
+📥 INBOX
+   [lifeos-agent: unprocessed inbox items]
 
 🧠 LIFELOG TODAY
    [lifelog-agent: day summary]`,
 };
+

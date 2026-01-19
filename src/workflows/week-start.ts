@@ -5,7 +5,6 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
-import { LIFEOS_DATABASES } from './types.js';
 
 /**
  * Get week date context
@@ -35,12 +34,12 @@ function getWeekContext(): { weekNumber: number; monday: string } {
 export function getWeekStartTasks(): SpecialistTask[] {
   return [
     {
-      specialist: 'notion-personal-agent',
+      specialist: 'lifeos-agent',
       task: `Query LifeOS for week planning:
-1. Current quarter goals from ${LIFEOS_DATABASES.GOALS} (Q1 2026)
-2. Open loops (Tasks with "Waiting On" set) from ${LIFEOS_DATABASES.TASKS}
-3. High priority tasks not yet completed
-Return: goal progress, carries from last week, blockers.`,
+1. Active goals with progress (P1, P2, P3)
+2. Active open loops (status: active)
+3. High priority tasks not yet completed (priority: high, status: active)
+Return: goal progress summary, open loops count, high priority task list.`,
     },
     {
       specialist: 'calendar-agent',

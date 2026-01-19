@@ -5,7 +5,6 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
-import { LIFEOS_DATABASES } from './types.js';
 
 /**
  * Generate specialist tasks for mid-week check
@@ -13,9 +12,9 @@ import { LIFEOS_DATABASES } from './types.js';
 export function getWeekMidTasks(): SpecialistTask[] {
   return [
     {
-      specialist: 'notion-personal-agent',
+      specialist: 'lifeos-agent',
       task: `Query LifeOS for mid-week check:
-1. High priority tasks from ${LIFEOS_DATABASES.TASKS} - what's their current status?
+1. High priority tasks - what's their current status?
 2. Any new blockers or "Waiting On" items added this week?
 3. Tasks marked In Progress
 Return: progress on priorities, new blockers, active work.`,

@@ -1,4 +1,4 @@
-import { app, Tray, Menu, nativeImage, shell, dialog, clipboard, Notification, NativeImage, BrowserWindow } from 'electron';
+import { app, Tray, Menu, nativeImage, shell, dialog, clipboard, Notification, NativeImage, BrowserWindow, ipcMain } from 'electron';
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -10,9 +10,15 @@ import AutoLaunch from 'auto-launch';
 
 // Server state
 let serverProcess: ChildProcess | null = null;
+let studioProcess: ChildProcess | null = null;
 let tray: Tray | null = null;
 let isServerRunning = false;
+let isStudioRunning = false;
 let debugWindow: BrowserWindow | null = null;
+
+// Studio port - use a private/ephemeral port to avoid conflicts
+// (54321 conflicts with Supabase default)
+const STUDIO_PORT = 64321;
 
 // Safe logging that won't crash on EPIPE
 function safeLog(...args: unknown[]): void {
@@ -174,6 +180,126 @@ function stopServer(): void {
   }
 }
 
+// Check if studio is healthy
+async function checkStudioHealth(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.request({
+      hostname: 'localhost',
+      port: STUDIO_PORT,
+      path: '/',
+      method: 'GET',
+      timeout: 2000
+    }, (res) => {
+      resolve(res.statusCode === 200);
+    });
+
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => {
+      req.destroy();
+      resolve(false);
+    });
+
+    req.end();
+  });
+}
+
+// Start the LifeOS Studio
+async function startStudio(): Promise<void> {
+  if (studioProcess) {
+    safeLog('Studio already running');
+    return;
+  }
+
+  // Get the cope-agent project directory
+  const copeAgentPath = isDev
+    ? path.join(__dirname, '..', '..')
+    : path.join(resourcesPath, '..');
+
+  // Check if sanity is available
+  const sanityBin = path.join(copeAgentPath, 'node_modules', '.bin', 'sanity');
+  if (!fs.existsSync(sanityBin)) {
+    safeError('Sanity CLI not found at:', sanityBin);
+    return;
+  }
+
+  // Set up environment with Sanity credentials
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PORT: String(STUDIO_PORT),
+  };
+
+  // Run sanity from project root where sanity.config.ts wrapper lives
+  studioProcess = spawn(sanityBin, ['dev', '--port', String(STUDIO_PORT)], {
+    cwd: copeAgentPath,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: false
+  });
+
+  studioProcess.stdout?.on('data', (data) => {
+    const output = data.toString();
+    safeLog(`[Studio] ${output}`);
+    // Detect when studio is ready
+    if (output.includes('running at') || output.includes('localhost:')) {
+      isStudioRunning = true;
+      updateTrayMenu();
+    }
+  });
+
+  studioProcess.stderr?.on('data', (data) => {
+    safeError(`[Studio Error] ${data.toString()}`);
+  });
+
+  studioProcess.on('error', (err) => {
+    safeError('Failed to start studio:', err);
+    studioProcess = null;
+    isStudioRunning = false;
+    updateTrayMenu();
+  });
+
+  studioProcess.on('exit', (code) => {
+    safeLog(`Studio exited with code ${code}`);
+    studioProcess = null;
+    isStudioRunning = false;
+    updateTrayMenu();
+  });
+
+  // Wait for studio to be ready
+  let attempts = 0;
+  while (attempts < 20) { // Studio takes longer to start
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (await checkStudioHealth()) {
+      isStudioRunning = true;
+      updateTrayMenu();
+      safeLog(`Studio running at http://localhost:${STUDIO_PORT}`);
+      return;
+    }
+    attempts++;
+  }
+
+  safeLog('Studio may still be starting...');
+}
+
+// Stop the studio
+function stopStudio(): void {
+  if (studioProcess) {
+    studioProcess.kill('SIGTERM');
+    studioProcess = null;
+    isStudioRunning = false;
+    updateTrayMenu();
+  }
+}
+
+// Open the studio in browser
+async function openStudio(): Promise<void> {
+  if (!isStudioRunning) {
+    await startStudio();
+    // Give it a moment to fully start
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  shell.openExternal(`http://localhost:${STUDIO_PORT}`);
+}
+
 // Open the debug window
 function openDebugWindow(): void {
   if (debugWindow) {
@@ -184,6 +310,10 @@ function openDebugWindow(): void {
   const debugHtmlPath = isDev
     ? path.join(__dirname, '..', 'assets', 'debug.html')
     : path.join(resourcesPath, 'assets', 'debug.html');
+
+  const preloadPath = isDev
+    ? path.join(__dirname, 'preload.js')
+    : path.join(resourcesPath, 'app', 'preload.js');
 
   // Show dock icon so window appears in Cmd+Tab
   if (process.platform === 'darwin') {
@@ -205,6 +335,7 @@ function openDebugWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false, // Allow self-signed certs for localhost SSE
+      preload: preloadPath,
     },
     backgroundColor: '#1e1e1e',
   });
@@ -293,6 +424,21 @@ function updateTrayMenu(): void {
       },
       { type: 'separator' },
       {
+        label: isStudioRunning ? `LifeOS Studio (port ${STUDIO_PORT})` : 'LifeOS Studio',
+        submenu: [
+          {
+            label: isStudioRunning ? 'Open in Browser' : 'Start & Open',
+            click: () => openStudio()
+          },
+          {
+            label: 'Stop Studio',
+            enabled: isStudioRunning,
+            click: () => stopStudio()
+          }
+        ]
+      },
+      { type: 'separator' },
+      {
         label: 'Start at Login',
         type: 'checkbox',
         checked: isEnabled,
@@ -320,6 +466,7 @@ function updateTrayMenu(): void {
       {
         label: 'Quit',
         click: () => {
+          stopStudio();
           stopServer();
           app.quit();
         }
@@ -386,6 +533,16 @@ app.whenReady().then(async () => {
 
   // Auto-start server on launch
   await startServer();
+
+  // IPC handlers for debug window
+  ipcMain.handle('open-studio', async () => {
+    await openStudio();
+    return { success: true, port: STUDIO_PORT };
+  });
+
+  ipcMain.handle('get-studio-status', () => {
+    return { running: isStudioRunning, port: STUDIO_PORT };
+  });
 });
 
 // Prevent app from quitting when all windows are closed

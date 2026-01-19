@@ -5,7 +5,6 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
-import { LIFEOS_DATABASES } from './types.js';
 
 /**
  * Get week date range
@@ -44,13 +43,13 @@ export function getWeekEndTasks(): SpecialistTask[] {
 
   return [
     {
-      specialist: 'notion-personal-agent',
+      specialist: 'lifeos-agent',
       task: `Query LifeOS for week review:
-1. Tasks completed this week from ${LIFEOS_DATABASES.TASKS} (Status = Done, modified ${monday} to ${friday})
-2. Decisions logged this week from ${LIFEOS_DATABASES.DECISIONS}
-3. Goal progress from ${LIFEOS_DATABASES.GOALS} (Q1 2026)
-4. Open loops carrying to next week (Tasks with "Waiting On" set)
-Return: wins, decisions, goal progress, carries.`,
+1. Tasks completed this week (status: done)
+2. Active goals with current progress (P1, P2, P3)
+3. Active open loops carrying to next week (status: active)
+4. High priority tasks still pending
+Return: completed count, goal progress summary, open loops, carries.`,
     },
     {
       specialist: 'lifelog-agent',

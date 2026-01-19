@@ -1,0 +1,13 @@
+{
+  "name": "lifeos-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LifeOS Sanity Studio",
+  "dependencies": {
+    "@sanity/client": "^7.14.0",
+    "@sanity/vision": "^5.4.0",
+    "sanity": "^5.4.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}

@@ -6,7 +6,6 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
-import { LIFEOS_DATABASES } from './types.js';
 
 /**
  * Get today's date in various formats
@@ -50,12 +49,13 @@ export function getDailyBriefingTasks(): SpecialistTask[] {
       task: `Check Slack activity from last 24 hours in #founders-talk and #product channels. Summarize key discussions and any messages requiring response.`,
     },
     {
-      specialist: 'notion-personal-agent',
-      task: `Query LifeOS for:
-1. High priority tasks (Status != Done, Priority = High) from ${LIFEOS_DATABASES.TASKS}
-2. Tasks with "Waiting On" property set (open loops)
-3. Unprocessed inbox items from ${LIFEOS_DATABASES.NOTES}
-Return as: priorities, open loops, inbox items.`,
+      specialist: 'lifeos-agent',
+      task: `Query LifeOS for today's briefing:
+1. High priority tasks (status: active, priority: high)
+2. Active open loops (status: active)
+3. Unprocessed inbox items (status: unprocessed)
+4. Active goals with progress (P1 and P2)
+Return: priorities, open loops, inbox count, goal progress summary.`,
     },
     {
       specialist: 'lifelog-agent',
@@ -93,7 +93,7 @@ Use spawn_parallel with these tasks:
 - calendar-agent: Get today's events from all calendars
 - email-agent: Check inbox, flag VIPs
 - slack-agent: Check overnight activity
-- notion-personal-agent: Get priorities and open loops from LifeOS
+- lifeos-agent: Get priorities, open loops, inbox count, and goal progress
 - lifelog-agent: Get overnight conversations and memories
 
 ## Output Format
@@ -165,13 +165,17 @@ Format the results as:
    [lifelog-agent output]
 
 📋 PRIORITIES
-   [notion-personal-agent output - priorities]
+   [lifeos-agent output - high priority tasks]
+
+🎯 GOALS
+   [lifeos-agent output - active goals with progress]
 
 🔄 OPEN LOOPS
-   [notion-personal-agent output - waiting on]
+   [lifeos-agent output - active open loops]
 
 📥 INBOX
-   [notion-personal-agent output - inbox]
+   [lifeos-agent output - unprocessed inbox count]
 
 🎯 THE ONE THING: [most important item for today]`,
 };
+

@@ -23,6 +23,11 @@ import {
   utilityToolsToAnthropicTools,
   executeUtilityTool,
 } from './utilities.js';
+import {
+  getSanityTools,
+  sanityToolsToAnthropicTools,
+  executeSanityTool,
+} from '../sanity/tools.js';
 
 // Debug client for specialist events
 const debug = getAgentDebugClient();
@@ -127,7 +132,7 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
     return {
       success: false,
       specialist,
-      error: `Unknown specialist: ${specialist}. Available: email-agent, calendar-agent, slack-agent, notion-personal-agent, notion-work-agent, lifelog-agent, school-agent, miro-agent, finance-agent, ics-sync-agent, cope-workflow-agent`,
+      error: `Unknown specialist: ${specialist}. Available: email-agent, calendar-agent, slack-agent, lifeos-agent, notion-work-agent, lifelog-agent, school-agent, miro-agent, finance-agent, ics-sync-agent, cope-workflow-agent`,
     };
   }
 
@@ -185,11 +190,17 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
       : [];
     const utilityToolsForApi = utilityToolsToAnthropicTools(agentUtilityTools);
 
+    // Get Sanity tools if defined for this agent
+    const agentSanityTools = agentDef.sanityTools
+      ? getSanityTools(agentDef.sanityTools)
+      : [];
+    const sanityToolsForApi = sanityToolsToAnthropicTools(agentSanityTools);
+
     // Combine all tools
-    const tools = [...mcpTools, ...utilityToolsForApi];
+    const tools = [...mcpTools, ...utilityToolsForApi, ...sanityToolsForApi];
 
     if (process.env.DEBUG) {
-      console.log(`[DEBUG] ${specialist}: ${tools.length} tools available (${mcpTools.length} MCP, ${utilityToolsForApi.length} utility)`);
+      console.log(`[DEBUG] ${specialist}: ${tools.length} tools available (${mcpTools.length} MCP, ${utilityToolsForApi.length} utility, ${sanityToolsForApi.length} sanity)`);
     }
 
     // Initialize conversation
@@ -265,14 +276,22 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
 
         toolsUsed.push(toolUse.name);
 
-        // Try utility tool first, then MCP
+        // Try utility tool first, then Sanity, then MCP
         let result = executeUtilityTool(
           toolUse.name,
           toolUse.input as Record<string, unknown>
         );
 
         if (result === null) {
-          // Not a utility tool, try MCP
+          // Not a utility tool, try Sanity
+          result = await executeSanityTool(
+            toolUse.name,
+            toolUse.input as Record<string, unknown>
+          );
+        }
+
+        if (result === null) {
+          // Not a Sanity tool, try MCP
           result = await executeMcpToolCall(
             connections,
             toolUse.name,
@@ -390,9 +409,9 @@ Available specialists:
 - email-agent: Gmail/email operations (gmail-work MCP)
 - calendar-agent: Calendar management (google-calendar-work, ical-home, magister MCPs)
 - slack-agent: Slack workspace (slack-tatoma MCP)
-- notion-personal-agent: LifeOS/personal Notion (notion-personal MCP)
 - notion-work-agent: Work Notion workspace (notion-work MCP)
 - lifelog-agent: Omi wearable memories (omi MCP)
+- lifeos-agent: LifeOS tasks, goals, inbox, open loops (Sanity CMS)
 - school-agent: School schedules (magister MCP)
 - miro-agent: Miro boards (miro MCP)
 - finance-agent: Financial coaching and YNAB budget management (ynab MCP)
@@ -411,9 +430,9 @@ Use discover_capability first to find the right specialist for a task.`,
           'email-agent',
           'calendar-agent',
           'slack-agent',
-          'notion-personal-agent',
           'notion-work-agent',
           'lifelog-agent',
+          'lifeos-agent',
           'school-agent',
           'miro-agent',
           'finance-agent',

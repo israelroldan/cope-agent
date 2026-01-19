@@ -6,7 +6,6 @@
 
 // Types
 export type { WorkflowDefinition, WorkflowResult, SpecialistTask } from './types.js';
-export { LIFEOS_DATABASES } from './types.js';
 
 // Daily workflows
 export { dailyBriefingWorkflow, getDailyBriefingTasks } from './daily-briefing.js';

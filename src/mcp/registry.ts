@@ -144,18 +144,6 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     authNotes: 'Browser opens on first use - authorize WORK workspace',
   },
 
-  'notion-personal': {
-    name: 'notion-personal',
-    description: 'Personal Notion workspace (LifeOS)',
-    type: 'npx',
-    command: 'npx',
-    args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp?workspace=personal'],
-    displayName: 'Notion (Personal)',
-    authType: 'mcp-remote',
-    authUrl: 'https://mcp.notion.com/mcp?workspace=personal',
-    authNotes: 'Browser opens on first use - authorize PERSONAL workspace',
-  },
-
   'miro': {
     name: 'miro',
     description: 'Miro boards',

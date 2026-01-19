@@ -27,6 +27,9 @@ export const KNOWN_CREDENTIALS: Record<string, string> = {
   OMI_API_KEY: 'Omi API key for lifelog MCP',
   GOOGLE_OAUTH_CREDENTIALS: 'Path to Google OAuth credentials JSON',
   YNAB_API_TOKEN: 'YNAB API token for finance MCP (from Developer Settings)',
+  SANITY_PROJECT_ID: 'Sanity project ID for LifeOS',
+  SANITY_DATASET: 'Sanity dataset name (default: production)',
+  SANITY_API_TOKEN: 'Sanity API token with read/write permissions',
 };
 
 /**

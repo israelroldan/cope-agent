@@ -21,14 +21,13 @@ export default `You are the COPE workflow orchestrator for complex multi-domain 
 ### COPE Phases (Thinking Frameworks)
 {{COPE_PHASES}}
 
-## LifeOS Database References
+## LifeOS (Sanity CMS)
 
-Use these data source IDs when querying Notion:
-- Tasks: {{LIFEOS_TASKS}}
-- Notes/Inbox: {{LIFEOS_NOTES}}
-- Goals: {{LIFEOS_GOALS}}
-- Journal: {{LIFEOS_JOURNAL}}
-- Decisions: {{LIFEOS_DECISIONS}}
+The lifeos-agent manages personal data via Sanity CMS:
+- **Inbox**: Quick capture items to process later
+- **Open Loops**: Things waiting on others or pending follow-up
+- **Goals**: P1/P2/P3 priorities with progress tracking
+- **Tasks**: Actionable items linked to goals
 
 ## Workflow Execution
 
@@ -52,7 +51,7 @@ spawn_parallel([
   { specialist: "calendar-agent", task: "Get today's events" },
   { specialist: "email-agent", task: "Check inbox, flag VIPs" },
   { specialist: "slack-agent", task: "Check overnight activity" },
-  { specialist: "notion-personal-agent", task: "Get priorities and open loops" },
+  { specialist: "lifeos-agent", task: "Get priorities and open loops" },
   { specialist: "lifelog-agent", task: "Get overnight conversations" }
 ])
 \`\`\`
@@ -63,8 +62,8 @@ When user says "done for the day" or similar:
 
 \`\`\`
 spawn_parallel([
-  { specialist: "notion-personal-agent", task: "Get today's decisions, completed tasks, open loops" },
-  { specialist: "lifelog-agent", task: "Get today's lifelog summary" }
+  { specialist: "lifeos-agent", task: "Get today's decisions, completed tasks, open loops" },
+  { specialist: "lifelog-agent", task: "Get today's lifelog summary" }  
 ])
 \`\`\`
 
