@@ -7,6 +7,8 @@
 
 import { config } from 'dotenv';
 import * as readline from 'readline';
+import * as fs from 'fs';
+import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { createCopeAgent } from './agent.js';
@@ -18,6 +20,136 @@ import {
   getConfigDir,
   loadCredentialsIntoEnv,
 } from './config/index.js';
+
+// CLI commands for tab completion
+const CLI_COMMANDS = [
+  '/quit', '/exit', '/q',
+  '/clear', '/c',
+  '/status', '/s',
+  '/mcp', '/mcp auth',
+  '/credentials', '/credentials list', '/credentials set', '/credentials delete',
+  '/help', '/h', '/?',
+];
+
+// Quick commands (natural language triggers)
+const QUICK_COMMANDS = [
+  'briefing', 'daily briefing',
+  'inbox', 'check email', 'email',
+  'calendar', "what's on today",
+  'priorities', 'tasks',
+  'slack', 'messages',
+];
+
+/**
+ * Get the history file path
+ */
+function getHistoryFilePath(): string {
+  return path.join(getConfigDir(), '.cope_history');
+}
+
+/**
+ * Load command history from file
+ */
+function loadHistory(): string[] {
+  const historyFile = getHistoryFilePath();
+  try {
+    if (fs.existsSync(historyFile)) {
+      const content = fs.readFileSync(historyFile, 'utf-8');
+      return content.split('\n').filter(Boolean).reverse(); // Most recent first
+    }
+  } catch (error) {
+    if (process.env.DEBUG) {
+      console.error(chalk.gray(`  [DEBUG] Failed to load history: ${error}`));
+    }
+  }
+  return [];
+}
+
+/**
+ * Save command history to file
+ */
+function saveHistory(history: string[]): void {
+  const historyFile = getHistoryFilePath();
+  try {
+    // Limit history to 500 entries, most recent last in file
+    const toSave = history.slice(0, 500).reverse();
+    fs.writeFileSync(historyFile, toSave.join('\n') + '\n', 'utf-8');
+  } catch (error) {
+    if (process.env.DEBUG) {
+      console.error(chalk.gray(`  [DEBUG] Failed to save history: ${error}`));
+    }
+  }
+}
+
+/**
+ * Find longest common prefix among strings
+ */
+function longestCommonPrefix(strings: string[]): string {
+  if (strings.length === 0) return '';
+  if (strings.length === 1) return strings[0];
+
+  let prefix = strings[0];
+  for (let i = 1; i < strings.length; i++) {
+    while (!strings[i].startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+      if (prefix === '') return '';
+    }
+  }
+  return prefix;
+}
+
+/**
+ * Tab completion function (bash-like behavior)
+ * - Single match: complete it fully
+ * - Multiple matches: complete to longest common prefix
+ * - Only show list when already at the prefix (second Tab)
+ */
+function completer(line: string): [string[], string] {
+  const trimmed = line.trimStart();
+
+  let candidates: string[] = [];
+
+  // Complete commands starting with /
+  if (trimmed.startsWith('/')) {
+    candidates = CLI_COMMANDS.filter(cmd => cmd.startsWith(trimmed));
+  } else if (trimmed.length > 0) {
+    // Complete quick commands
+    candidates = QUICK_COMMANDS.filter(cmd => cmd.startsWith(trimmed.toLowerCase()));
+  }
+
+  if (candidates.length === 0) {
+    return [[], line];
+  }
+
+  if (candidates.length === 1) {
+    // Single match - complete it with trailing space
+    return [[candidates[0] + ' '], trimmed];
+  }
+
+  // Multiple matches - find longest common prefix
+  const lcp = longestCommonPrefix(candidates);
+
+  if (lcp.length > trimmed.length) {
+    // Can extend - complete to LCP without showing list
+    return [[lcp], trimmed];
+  }
+
+  // Already at LCP - show options (like bash on second Tab)
+  return [candidates, trimmed];
+}
+
+// Module-level reference to readline for history saving on exit
+let activeReadline: (readline.Interface & { history?: string[] }) | null = null;
+
+/**
+ * Save history and exit gracefully
+ */
+function gracefulExit(code: number = 0): void {
+  if (activeReadline?.history && activeReadline.history.length > 0) {
+    saveHistory(activeReadline.history);
+  }
+  process.exit(code);
+}
 
 // Load credentials from ~/.config/cope-agent/.env first
 loadCredentialsIntoEnv();
@@ -117,13 +249,23 @@ async function main(): Promise<void> {
   console.log(colors.cope(`  ${agent.getGreeting()}`));
   console.log();
   console.log(colors.dim('  Commands: /quit, /clear, /status, /help'));
+  console.log(colors.dim('  Tab completion enabled. History persisted across sessions.'));
   console.log();
 
-  // Create readline interface
+  // Load history from file
+  const history = loadHistory();
+
+  // Create readline interface with history and tab completion
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-  });
+    completer,
+    history,
+    historySize: 500,
+  }) as readline.Interface & { history?: string[] };
+
+  // Store reference for history saving on exit
+  activeReadline = rl;
 
   const processInput = async (input: string): Promise<void> => {
     const trimmed = input.trim();
@@ -142,7 +284,7 @@ async function main(): Promise<void> {
     const exitPhrases = ['exit', 'quit', 'bye', 'goodbye', 'q'];
     if (exitPhrases.includes(trimmed.toLowerCase())) {
       console.log(colors.dim('  Goodbye!'));
-      process.exit(0);
+      gracefulExit(0);
     }
 
     // Process message
@@ -191,7 +333,7 @@ async function main(): Promise<void> {
   rl.on('close', () => {
     console.log();
     console.log(colors.dim('  Goodbye!'));
-    process.exit(0);
+    gracefulExit(0);
   });
 
   // Start prompt loop
@@ -224,7 +366,7 @@ async function handleCommand(
     case '/exit':
     case '/q':
       console.log(colors.dim('  Goodbye!'));
-      process.exit(0);
+      gracefulExit(0);
 
     case '/clear':
     case '/c':
@@ -264,6 +406,11 @@ async function handleCommand(
       console.log(colors.dim('    inbox         - Check email'));
       console.log(colors.dim('    calendar      - Today\'s calendar'));
       console.log(colors.dim('    priorities    - Show priorities'));
+      console.log();
+      console.log(colors.dim('  Tips:'));
+      console.log(colors.dim('    - Press Tab for command completion'));
+      console.log(colors.dim('    - Use Up/Down arrows for command history'));
+      console.log(colors.dim('    - History is saved across sessions'));
       console.log();
       break;
 
