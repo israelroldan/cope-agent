@@ -27,5 +27,9 @@ export const config: Pick<AgentDefinition, 'model' | 'mcpServers' | 'maxTurns' |
     'lifeos_create_task',
     'lifeos_query_tasks',
     'lifeos_update_task',
+    // Decision tools
+    'lifeos_create_decision',
+    'lifeos_query_decisions',
+    'lifeos_update_decision',
   ],
 };

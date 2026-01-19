@@ -26,6 +26,9 @@ export { organiseWorkflow } from './organise.js';
 export { prioritiseWorkflow } from './prioritise.js';
 export { executeWorkflow } from './execute.js';
 
+// LifeOS workflows
+export { processInboxWorkflow } from './process-inbox.js';
+
 import type { WorkflowDefinition } from './types.js';
 import { dailyBriefingWorkflow } from './daily-briefing.js';
 import { dailyCloseWorkflow } from './daily-close.js';
@@ -38,6 +41,7 @@ import { clarifyWorkflow } from './clarify.js';
 import { organiseWorkflow } from './organise.js';
 import { prioritiseWorkflow } from './prioritise.js';
 import { executeWorkflow } from './execute.js';
+import { processInboxWorkflow } from './process-inbox.js';
 
 /**
  * All workflows indexed by name
@@ -54,6 +58,7 @@ export const workflows: Record<string, WorkflowDefinition> = {
   'organise': organiseWorkflow,
   'prioritise': prioritiseWorkflow,
   'execute': executeWorkflow,
+  'process-inbox': processInboxWorkflow,
 };
 
 /**

@@ -10,7 +10,7 @@
  * 2. Update SCHEMA_DEFINITIONS for documentation
  * 3. Add migration logic to migrateSchema() if needed
  *
- * Focused schema: Inbox, Open Loops, Goals, Tasks.
+ * Focused schema: Inbox, Open Loops, Goals, Tasks, Decisions.
  */
 
 /**
@@ -74,16 +74,25 @@ export interface OpenLoopInput {
 
 /**
  * Goal - larger objectives with progress tracking
+ *
+ * Supports hierarchy for lightweight OKRs:
+ * - Yearly goals (top level)
+ *   - Quarterly goals (children of yearly)
+ *     - Monthly goals (children of quarterly)
+ *       - Weekly goals (children of monthly)
  */
 export interface Goal extends SanityDocument {
   _type: 'goal';
   title: string;
   status: 'not_started' | 'in_progress' | 'completed' | 'paused';
   priority: 'P1' | 'P2' | 'P3';
+  timeframe?: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'ongoing';
+  targetWeek?: string; // ISO week format: "2024-W03"
   progress?: number; // 0-100
   deadline?: string; // ISO date string
   description?: string;
   keyResults?: string[]; // Measurable outcomes
+  parentGoal?: { _ref: string; _type: 'reference' }; // Reference to parent goal (for OKR hierarchy)
 }
 
 /**
@@ -93,10 +102,13 @@ export interface GoalInput {
   title: string;
   status?: 'not_started' | 'in_progress' | 'completed' | 'paused';
   priority: 'P1' | 'P2' | 'P3';
+  timeframe?: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'ongoing';
+  targetWeek?: string;
   progress?: number;
   deadline?: string;
   description?: string;
   keyResults?: string[];
+  parentGoal?: string; // Parent goal ID (for OKR hierarchy)
 }
 
 /**
@@ -126,6 +138,35 @@ export interface TaskInput {
 }
 
 /**
+ * Decision - important choices that should be tracked
+ */
+export interface Decision extends SanityDocument {
+  _type: 'decision';
+  title: string;
+  context?: string; // What was the situation/problem
+  outcome: string; // What was decided
+  rationale?: string; // Why this decision was made
+  status: 'pending' | 'made' | 'revisit';
+  decidedAt?: string; // ISO date string
+  relatedGoal?: { _ref: string; _type: 'reference' }; // Reference to a Goal
+  tags?: string[];
+}
+
+/**
+ * Input for creating a decision
+ */
+export interface DecisionInput {
+  title: string;
+  context?: string;
+  outcome: string;
+  rationale?: string;
+  status?: 'pending' | 'made' | 'revisit';
+  decidedAt?: string;
+  relatedGoal?: string; // Goal ID
+  tags?: string[];
+}
+
+/**
  * Document type names for GROQ queries
  */
 export const DOCUMENT_TYPES = {
@@ -133,6 +174,7 @@ export const DOCUMENT_TYPES = {
   OPEN_LOOP: 'openLoop',
   GOAL: 'goal',
   TASK: 'task',
+  DECISION: 'decision',
 } as const;
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[keyof typeof DOCUMENT_TYPES];
@@ -215,7 +257,8 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
   {
     name: 'goal',
     title: 'Goal',
-    description: 'Larger objectives with progress tracking',
+    description:
+      'Larger objectives with progress tracking. Supports hierarchy for lightweight OKRs: yearly → quarterly → monthly → weekly goals.',
     fields: [
       { name: 'title', type: 'string', required: true, description: 'Goal title' },
       {
@@ -232,10 +275,23 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
         description: 'Priority level (P1=critical, P2=important, P3=nice-to-have)',
         options: ['P1', 'P2', 'P3'],
       },
+      {
+        name: 'timeframe',
+        type: 'string',
+        description: 'Time period for this goal',
+        options: ['weekly', 'monthly', 'quarterly', 'yearly', 'ongoing'],
+      },
+      { name: 'targetWeek', type: 'string', description: 'Target week (ISO format: 2024-W03)' },
       { name: 'progress', type: 'number', description: 'Completion percentage (0-100)' },
       { name: 'deadline', type: 'date', description: 'Target completion date' },
       { name: 'description', type: 'text', description: 'Detailed description' },
       { name: 'keyResults', type: 'array', of: 'string', description: 'Measurable outcomes' },
+      {
+        name: 'parentGoal',
+        type: 'reference',
+        to: 'goal',
+        description: 'Parent goal for OKR hierarchy (e.g., weekly goal under monthly goal)',
+      },
     ],
   },
   {
@@ -262,6 +318,27 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
       { name: 'relatedGoal', type: 'reference', to: 'goal', description: 'Related goal' },
       { name: 'notes', type: 'text', description: 'Additional notes' },
       { name: 'completedAt', type: 'datetime', description: 'When the task was completed' },
+    ],
+  },
+  {
+    name: 'decision',
+    title: 'Decision',
+    description: 'Important choices that should be tracked for future reference',
+    fields: [
+      { name: 'title', type: 'string', required: true, description: 'Brief title of the decision' },
+      { name: 'context', type: 'text', description: 'What was the situation or problem' },
+      { name: 'outcome', type: 'text', required: true, description: 'What was decided' },
+      { name: 'rationale', type: 'text', description: 'Why this decision was made' },
+      {
+        name: 'status',
+        type: 'string',
+        required: true,
+        description: 'Decision status',
+        options: ['pending', 'made', 'revisit'],
+      },
+      { name: 'decidedAt', type: 'date', description: 'When the decision was made' },
+      { name: 'relatedGoal', type: 'reference', to: 'goal', description: 'Related goal' },
+      { name: 'tags', type: 'array', of: 'string', description: 'Tags for categorization' },
     ],
   },
 ];

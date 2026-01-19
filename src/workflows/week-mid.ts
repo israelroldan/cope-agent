@@ -14,10 +14,11 @@ export function getWeekMidTasks(): SpecialistTask[] {
     {
       specialist: 'lifeos-agent',
       task: `Query LifeOS for mid-week check:
-1. High priority tasks - what's their current status?
-2. Any new blockers or "Waiting On" items added this week?
+1. Active goals with current progress (P1, P2, P3) - are we on track?
+2. High priority tasks - what's their current status?
 3. Tasks marked In Progress
-Return: progress on priorities, new blockers, active work.`,
+4. Active open loops - any new blockers or "Waiting On" items?
+Return: goal progress vs Monday, task status, blockers.`,
     },
   ];
 }
@@ -67,21 +68,25 @@ Does the week's plan still make sense?
 
 📊 MID-WEEK CHECK
 
-📋 TOP 3 PROGRESS
+🎯 GOAL PROGRESS
+   [P1] [goal]: [progress %] - [on track / behind / at risk]
+   [P2] [goal]: [progress %] - [status]
+
+📋 TOP 3 PRIORITIES
    1. [priority]: [status] [on track / behind / blocked]
    2. [priority]: [status]
    3. [priority]: [status]
 
-🚧 NEW BLOCKERS
-   - [unexpected blocker]
+🚧 BLOCKERS
+   - [blocker] → [what's needed to unblock]
 
-🔄 ADJUSTMENTS NEEDED
-   - [what needs to change]
+🔄 OPEN LOOPS
+   - Waiting on [who] for [what]
 
 ⏰ REMAINING TIME
    [days left, calendar constraints]
 
-💭 REFLECTION
-   - Working on right things? [yes/no + why]
-   - What needs to change?`,
+💭 COURSE CORRECT?
+   - Goals still achievable? [yes/no]
+   - Adjustments needed: [what to change]`,
 };

@@ -2,7 +2,7 @@
  * LifeOS Sanity Tools
  *
  * CRUD tools for LifeOS data in Sanity CMS.
- * 12 tools: 3 per document type (create, query, update).
+ * 15 tools: 3 per document type (create, query, update).
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -16,6 +16,8 @@ import type {
   GoalInput,
   Task,
   TaskInput,
+  Decision,
+  DecisionInput,
 } from './schema.js';
 import { DOCUMENT_TYPES } from './schema.js';
 
@@ -390,10 +392,21 @@ export const createGoalTool: SanityTool = {
   name: 'lifeos_create_goal',
   description: `Create a new goal in LifeOS. Use for larger objectives with progress tracking.
 
+Supports OKR-style hierarchy: yearly → quarterly → monthly → weekly goals.
+
 Priority levels:
 - P1: Must happen (critical)
 - P2: Should happen (important)
-- P3: Nice to have`,
+- P3: Nice to have
+
+Timeframes:
+- weekly: Goals for this week
+- monthly: Goals for this month
+- quarterly: Goals for this quarter
+- yearly: Goals for this year
+- ongoing: No specific end date
+
+Use parentGoal to link to a higher-level goal (e.g., link weekly goal to monthly goal).`,
 
   input_schema: {
     type: 'object',
@@ -406,6 +419,15 @@ Priority levels:
         type: 'string',
         enum: ['P1', 'P2', 'P3'],
         description: 'Priority level',
+      },
+      timeframe: {
+        type: 'string',
+        enum: ['weekly', 'monthly', 'quarterly', 'yearly', 'ongoing'],
+        description: 'Time period for this goal',
+      },
+      targetWeek: {
+        type: 'string',
+        description: 'Target week in ISO format (e.g., 2024-W03). Auto-set for weekly goals.',
       },
       deadline: {
         type: 'string',
@@ -420,6 +442,10 @@ Priority levels:
         items: { type: 'string' },
         description: 'Measurable outcomes',
       },
+      parentGoal: {
+        type: 'string',
+        description: 'ID of parent goal for OKR hierarchy (e.g., link weekly goal to monthly goal)',
+      },
     },
     required: ['title', 'priority'],
   },
@@ -427,25 +453,57 @@ Priority levels:
   execute: async (input: Record<string, unknown>): Promise<string> => {
     try {
       const client = getSanityClient();
+
+      // Auto-calculate targetWeek for weekly goals if not provided
+      let targetWeek = input.targetWeek ? String(input.targetWeek) : undefined;
+      if (input.timeframe === 'weekly' && !targetWeek) {
+        const now = new Date();
+        const year = now.getFullYear();
+        const start = new Date(year, 0, 1);
+        const diff = now.getTime() - start.getTime();
+        const oneWeek = 1000 * 60 * 60 * 24 * 7;
+        const weekNum = Math.ceil(diff / oneWeek);
+        targetWeek = `${year}-W${String(weekNum).padStart(2, '0')}`;
+      }
+
       const data: GoalInput = {
         title: String(input.title),
         priority: input.priority as GoalInput['priority'],
         status: 'not_started',
         progress: 0,
+        timeframe: input.timeframe as GoalInput['timeframe'],
+        targetWeek,
         deadline: input.deadline ? String(input.deadline) : undefined,
         description: input.description ? String(input.description) : undefined,
         keyResults: Array.isArray(input.keyResults) ? input.keyResults.map(String) : undefined,
+        parentGoal: input.parentGoal ? String(input.parentGoal) : undefined,
       };
 
-      const result = await client.create({
+      // Build document with proper reference structure
+      const doc: { _type: string; [key: string]: unknown } = {
         _type: DOCUMENT_TYPES.GOAL,
-        ...data,
-      });
+        title: data.title,
+        priority: data.priority,
+        status: data.status,
+        progress: data.progress,
+      };
+      if (data.timeframe) doc.timeframe = data.timeframe;
+      if (data.targetWeek) doc.targetWeek = data.targetWeek;
+      if (data.deadline) doc.deadline = data.deadline;
+      if (data.description) doc.description = data.description;
+      if (data.keyResults) doc.keyResults = data.keyResults;
+      if (data.parentGoal) {
+        doc.parentGoal = { _type: 'reference', _ref: data.parentGoal };
+      }
 
+      const result = await client.create(doc);
+
+      const timeInfo = data.timeframe ? ` [${data.timeframe}]` : '';
+      const parentInfo = data.parentGoal ? ' (linked to parent)' : '';
       return JSON.stringify({
         success: true,
         id: result._id,
-        message: `Goal "${data.title}" created (${data.priority})`,
+        message: `Goal "${data.title}" created (${data.priority})${timeInfo}${parentInfo}`,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -456,11 +514,15 @@ Priority levels:
 
 export const queryGoalsTool: SanityTool = {
   name: 'lifeos_query_goals',
-  description: `Query goals from LifeOS. Returns goals with progress tracking.
+  description: `Query goals from LifeOS. Returns goals with progress tracking and hierarchy.
 
 Filter by:
 - status: not_started, in_progress, completed, paused
-- priority: P1, P2, P3`,
+- priority: P1, P2, P3
+- timeframe: weekly, monthly, quarterly, yearly, ongoing
+- targetWeek: ISO week (e.g., 2024-W03) for weekly goals
+- parentGoal: ID to get child goals of a specific goal
+- topLevel: true to get only goals without parents (root goals)`,
 
   input_schema: {
     type: 'object',
@@ -475,6 +537,27 @@ Filter by:
         enum: ['P1', 'P2', 'P3', 'all'],
         description: 'Filter by priority (default: all)',
       },
+      timeframe: {
+        type: 'string',
+        enum: ['weekly', 'monthly', 'quarterly', 'yearly', 'ongoing', 'all'],
+        description: 'Filter by timeframe (default: all)',
+      },
+      targetWeek: {
+        type: 'string',
+        description: 'Filter weekly goals by ISO week (e.g., 2024-W03)',
+      },
+      parentGoal: {
+        type: 'string',
+        description: 'Get child goals of this parent goal ID',
+      },
+      topLevel: {
+        type: 'boolean',
+        description: 'If true, only return goals without a parent (root/top-level goals)',
+      },
+      includeChildren: {
+        type: 'boolean',
+        description: 'If true, include child goals in the response',
+      },
       limit: {
         type: 'number',
         description: 'Max items to return (default: 20)',
@@ -487,6 +570,7 @@ Filter by:
       const client = getSanityClient();
       const status = input.status || 'all';
       const priority = input.priority || 'all';
+      const timeframe = input.timeframe || 'all';
       const limit = Number(input.limit) || 20;
 
       let query = `*[_type == "${DOCUMENT_TYPES.GOAL}"`;
@@ -504,9 +588,41 @@ Filter by:
         query += ` && priority == "${priority}"`;
       }
 
-      query += `] | order(priority asc, deadline asc) [0...${limit}] {
-        _id, title, status, priority, progress, deadline, description, keyResults, _createdAt
-      }`;
+      // Timeframe filter
+      if (timeframe !== 'all') {
+        query += ` && timeframe == "${timeframe}"`;
+      }
+
+      // Target week filter
+      if (input.targetWeek) {
+        query += ` && targetWeek == "${input.targetWeek}"`;
+      }
+
+      // Parent goal filter (get children of a specific goal)
+      if (input.parentGoal) {
+        query += ` && parentGoal._ref == "${input.parentGoal}"`;
+      }
+
+      // Top level filter (goals without parents)
+      if (input.topLevel === true) {
+        query += ` && !defined(parentGoal)`;
+      }
+
+      // Build projection with optional children
+      let projection = `{
+        _id, title, status, priority, timeframe, targetWeek, progress, deadline, description, keyResults, _createdAt,
+        "parentGoal": parentGoal->{_id, title, priority, timeframe}`;
+
+      if (input.includeChildren === true) {
+        projection += `,
+        "children": *[_type == "goal" && parentGoal._ref == ^._id] | order(priority asc) {
+          _id, title, status, priority, timeframe, targetWeek, progress
+        }`;
+      }
+
+      projection += `}`;
+
+      query += `] | order(priority asc, deadline asc) [0...${limit}] ${projection}`;
 
       const results = await client.fetch<Goal[]>(query);
 
@@ -524,7 +640,7 @@ Filter by:
 
 export const updateGoalTool: SanityTool = {
   name: 'lifeos_update_goal',
-  description: `Update a goal in LifeOS. Use to update progress, status, etc.`,
+  description: `Update a goal in LifeOS. Use to update progress, status, timeframe, parent link, etc.`,
 
   input_schema: {
     type: 'object',
@@ -551,9 +667,26 @@ export const updateGoalTool: SanityTool = {
         enum: ['P1', 'P2', 'P3'],
         description: 'Updated priority',
       },
+      timeframe: {
+        type: 'string',
+        enum: ['weekly', 'monthly', 'quarterly', 'yearly', 'ongoing'],
+        description: 'Updated timeframe',
+      },
+      targetWeek: {
+        type: 'string',
+        description: 'Updated target week (ISO format: 2024-W03)',
+      },
       deadline: {
         type: 'string',
         description: 'Updated deadline (ISO format)',
+      },
+      parentGoal: {
+        type: 'string',
+        description: 'Link to parent goal ID (for OKR hierarchy)',
+      },
+      removeParent: {
+        type: 'boolean',
+        description: 'Set to true to remove parent goal link',
       },
     },
     required: ['id'],
@@ -564,14 +697,29 @@ export const updateGoalTool: SanityTool = {
       const client = getSanityClient();
       const id = String(input.id);
 
-      const updates: Partial<GoalInput> = {};
-      if (input.status) updates.status = input.status as GoalInput['status'];
+      const updates: Record<string, unknown> = {};
+      if (input.status) updates.status = input.status;
       if (input.progress !== undefined) updates.progress = Number(input.progress);
       if (input.title) updates.title = String(input.title);
-      if (input.priority) updates.priority = input.priority as GoalInput['priority'];
+      if (input.priority) updates.priority = input.priority;
+      if (input.timeframe) updates.timeframe = input.timeframe;
+      if (input.targetWeek) updates.targetWeek = String(input.targetWeek);
       if (input.deadline) updates.deadline = String(input.deadline);
 
-      const result = await client.patch(id).set(updates).commit();
+      // Handle parent goal reference
+      if (input.parentGoal) {
+        updates.parentGoal = { _type: 'reference', _ref: String(input.parentGoal) };
+      }
+
+      // Build patch
+      let patch = client.patch(id).set(updates);
+
+      // Handle removing parent goal
+      if (input.removeParent === true) {
+        patch = patch.unset(['parentGoal']);
+      }
+
+      const result = await patch.commit();
 
       return JSON.stringify({
         success: true,
@@ -828,6 +976,223 @@ export const updateTaskTool: SanityTool = {
 };
 
 // ============================================================================
+// DECISION TOOLS
+// ============================================================================
+
+export const createDecisionTool: SanityTool = {
+  name: 'lifeos_create_decision',
+  description: `Create a new decision in LifeOS. Use to track important choices and their rationale.
+
+Example: Record a decision about architecture, hiring, priorities, etc.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: 'Brief title of the decision',
+      },
+      outcome: {
+        type: 'string',
+        description: 'What was decided',
+      },
+      context: {
+        type: 'string',
+        description: 'What was the situation or problem',
+      },
+      rationale: {
+        type: 'string',
+        description: 'Why this decision was made',
+      },
+      status: {
+        type: 'string',
+        enum: ['pending', 'made', 'revisit'],
+        description: 'Decision status (default: made)',
+      },
+      decidedAt: {
+        type: 'string',
+        description: 'When the decision was made (ISO date)',
+      },
+      relatedGoal: {
+        type: 'string',
+        description: 'Optional goal ID this decision relates to',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Tags for categorization',
+      },
+    },
+    required: ['title', 'outcome'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const data: DecisionInput = {
+        title: String(input.title),
+        outcome: String(input.outcome),
+        context: input.context ? String(input.context) : undefined,
+        rationale: input.rationale ? String(input.rationale) : undefined,
+        status: (input.status as DecisionInput['status']) || 'made',
+        decidedAt: input.decidedAt ? String(input.decidedAt) : new Date().toISOString().split('T')[0],
+        relatedGoal: input.relatedGoal ? String(input.relatedGoal) : undefined,
+        tags: Array.isArray(input.tags) ? input.tags.map(String) : undefined,
+      };
+
+      const doc: { _type: string; [key: string]: unknown } = {
+        _type: DOCUMENT_TYPES.DECISION,
+        ...data,
+      };
+
+      // Add goal reference if provided
+      if (data.relatedGoal) {
+        doc.relatedGoal = { _ref: data.relatedGoal, _type: 'reference' };
+      }
+
+      const result = await client.create(doc);
+
+      return JSON.stringify({
+        success: true,
+        id: result._id,
+        message: `Decision "${data.title}" recorded`,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const queryDecisionsTool: SanityTool = {
+  name: 'lifeos_query_decisions',
+  description: `Query decisions from LifeOS. Returns decisions matching the filter criteria.
+
+Use to review past decisions, find decisions by tag, or list recent choices.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['pending', 'made', 'revisit', 'all'],
+        description: 'Filter by status (default: all)',
+      },
+      tag: {
+        type: 'string',
+        description: 'Filter by tag',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max results (default: 50)',
+      },
+    },
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const limit = Number(input.limit) || 50;
+
+      let query = `*[_type == "${DOCUMENT_TYPES.DECISION}"`;
+      const params: Record<string, unknown> = {};
+
+      if (input.status && input.status !== 'all') {
+        query += ` && status == $status`;
+        params.status = input.status;
+      }
+
+      if (input.tag) {
+        query += ` && $tag in tags`;
+        params.tag = input.tag;
+      }
+
+      query += `] | order(decidedAt desc)[0...${limit}]`;
+      query += `{_id, title, outcome, context, rationale, status, decidedAt, tags, "relatedGoal": relatedGoal->title}`;
+
+      const results = await client.fetch<Decision[]>(query, params);
+
+      return JSON.stringify({
+        success: true,
+        count: results.length,
+        items: results,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const updateDecisionTool: SanityTool = {
+  name: 'lifeos_update_decision',
+  description: `Update a decision in LifeOS. Use to add rationale, change status, or update details.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: {
+        type: 'string',
+        description: 'The _id of the decision to update',
+      },
+      title: {
+        type: 'string',
+        description: 'Updated title',
+      },
+      outcome: {
+        type: 'string',
+        description: 'Updated outcome',
+      },
+      context: {
+        type: 'string',
+        description: 'Updated context',
+      },
+      rationale: {
+        type: 'string',
+        description: 'Updated rationale',
+      },
+      status: {
+        type: 'string',
+        enum: ['pending', 'made', 'revisit'],
+        description: 'Updated status',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Updated tags',
+      },
+    },
+    required: ['id'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const id = String(input.id);
+
+      const updates: Record<string, unknown> = {};
+      if (input.title) updates.title = String(input.title);
+      if (input.outcome) updates.outcome = String(input.outcome);
+      if (input.context) updates.context = String(input.context);
+      if (input.rationale) updates.rationale = String(input.rationale);
+      if (input.status) updates.status = input.status;
+      if (Array.isArray(input.tags)) updates.tags = input.tags.map(String);
+
+      const result = await client.patch(id).set(updates).commit();
+
+      return JSON.stringify({
+        success: true,
+        id: result._id,
+        message: 'Decision updated',
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+// ============================================================================
 // TOOL REGISTRY
 // ============================================================================
 
@@ -847,6 +1212,9 @@ export const sanityTools: Record<string, SanityTool> = {
   lifeos_create_task: createTaskTool,
   lifeos_query_tasks: queryTasksTool,
   lifeos_update_task: updateTaskTool,
+  lifeos_create_decision: createDecisionTool,
+  lifeos_query_decisions: queryDecisionsTool,
+  lifeos_update_decision: updateDecisionTool,
 };
 
 /**

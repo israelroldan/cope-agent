@@ -28,7 +28,7 @@ export interface WorkflowDefinition {
   triggers: string[];
 
   /** Category of workflow */
-  category: 'daily' | 'weekly' | 'cope-phase' | 'ad-hoc';
+  category: 'daily' | 'weekly' | 'cope-phase' | 'lifeos' | 'ad-hoc';
 
   /** Specialists to spawn (in parallel if multiple) */
   specialists: SpecialistTask[];
