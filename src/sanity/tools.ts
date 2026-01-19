@@ -14,6 +14,8 @@ import type {
   OpenLoopInput,
   Goal,
   GoalInput,
+  Project,
+  ProjectInput,
   Task,
   TaskInput,
   Decision,
@@ -174,6 +176,10 @@ export const updateInboxTool: SanityTool = {
         items: { type: 'string' },
         description: 'Updated tags',
       },
+      source: {
+        type: 'string',
+        description: 'Updated source (voice, email, manual, etc.)',
+      },
     },
     required: ['id'],
   },
@@ -188,6 +194,7 @@ export const updateInboxTool: SanityTool = {
       if (input.title) updates.title = String(input.title);
       if (input.content) updates.content = String(input.content);
       if (Array.isArray(input.tags)) updates.tags = input.tags.map(String);
+      if (input.source) updates.source = String(input.source);
 
       const result = await client.patch(id).set(updates).commit();
 
@@ -236,6 +243,10 @@ Example: "Waiting on John to review the proposal"`,
         type: 'string',
         description: 'Additional context',
       },
+      relatedProject: {
+        type: 'string',
+        description: 'ID of related project (optional)',
+      },
     },
     required: ['title', 'waitingOn'],
   },
@@ -250,12 +261,23 @@ Example: "Waiting on John to review the proposal"`,
         dueDate: input.dueDate ? String(input.dueDate) : undefined,
         nextAction: input.nextAction ? String(input.nextAction) : undefined,
         context: input.context ? String(input.context) : undefined,
+        relatedProject: input.relatedProject ? String(input.relatedProject) : undefined,
       };
 
-      const result = await client.create({
+      const doc: { _type: string; [key: string]: unknown } = {
         _type: DOCUMENT_TYPES.OPEN_LOOP,
-        ...data,
-      });
+        title: data.title,
+        waitingOn: data.waitingOn,
+        status: data.status,
+      };
+      if (data.dueDate) doc.dueDate = data.dueDate;
+      if (data.nextAction) doc.nextAction = data.nextAction;
+      if (data.context) doc.context = data.context;
+      if (data.relatedProject) {
+        doc.relatedProject = { _type: 'reference', _ref: data.relatedProject };
+      }
+
+      const result = await client.create(doc);
 
       return JSON.stringify({
         success: true,
@@ -287,6 +309,10 @@ Filter by status:
         enum: ['active', 'resolved', 'stale', 'all'],
         description: 'Filter by status (default: active)',
       },
+      relatedProject: {
+        type: 'string',
+        description: 'Filter by project ID',
+      },
       limit: {
         type: 'number',
         description: 'Max items to return (default: 20)',
@@ -304,8 +330,12 @@ Filter by status:
       if (status !== 'all') {
         query += ` && status == "${status}"`;
       }
+      if (input.relatedProject) {
+        query += ` && relatedProject._ref == "${input.relatedProject}"`;
+      }
       query += `] | order(dueDate asc, _createdAt desc) [0...${limit}] {
-        _id, title, waitingOn, status, dueDate, nextAction, context, _createdAt
+        _id, title, waitingOn, status, dueDate, nextAction, context, _createdAt,
+        "relatedProject": relatedProject->{_id, title, priority}
       }`;
 
       const results = await client.fetch<OpenLoop[]>(query);
@@ -354,6 +384,14 @@ export const updateOpenLoopTool: SanityTool = {
         type: 'string',
         description: 'Updated next action',
       },
+      context: {
+        type: 'string',
+        description: 'Updated context',
+      },
+      relatedProject: {
+        type: 'string',
+        description: 'Link to project ID',
+      },
     },
     required: ['id'],
   },
@@ -363,12 +401,16 @@ export const updateOpenLoopTool: SanityTool = {
       const client = getSanityClient();
       const id = String(input.id);
 
-      const updates: Partial<OpenLoopInput> = {};
-      if (input.status) updates.status = input.status as OpenLoopInput['status'];
+      const updates: Record<string, unknown> = {};
+      if (input.status) updates.status = input.status;
       if (input.title) updates.title = String(input.title);
       if (input.waitingOn) updates.waitingOn = String(input.waitingOn);
       if (input.dueDate) updates.dueDate = String(input.dueDate);
       if (input.nextAction) updates.nextAction = String(input.nextAction);
+      if (input.context) updates.context = String(input.context);
+      if (input.relatedProject) {
+        updates.relatedProject = { _type: 'reference', _ref: String(input.relatedProject) };
+      }
 
       const result = await client.patch(id).set(updates).commit();
 
@@ -680,6 +722,15 @@ export const updateGoalTool: SanityTool = {
         type: 'string',
         description: 'Updated deadline (ISO format)',
       },
+      description: {
+        type: 'string',
+        description: 'Updated description',
+      },
+      keyResults: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Updated key results (measurable outcomes)',
+      },
       parentGoal: {
         type: 'string',
         description: 'Link to parent goal ID (for OKR hierarchy)',
@@ -705,6 +756,8 @@ export const updateGoalTool: SanityTool = {
       if (input.timeframe) updates.timeframe = input.timeframe;
       if (input.targetWeek) updates.targetWeek = String(input.targetWeek);
       if (input.deadline) updates.deadline = String(input.deadline);
+      if (input.description) updates.description = String(input.description);
+      if (Array.isArray(input.keyResults)) updates.keyResults = input.keyResults.map(String);
 
       // Handle parent goal reference
       if (input.parentGoal) {
@@ -725,6 +778,257 @@ export const updateGoalTool: SanityTool = {
         success: true,
         id: result._id,
         message: 'Goal updated',
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+// ============================================================================
+// PROJECT TOOLS
+// ============================================================================
+
+export const createProjectTool: SanityTool = {
+  name: 'lifeos_create_project',
+  description: `Create a new project in LifeOS. Use for grouping related tasks and work.
+
+Priority levels:
+- P1: Critical, must complete
+- P2: Important
+- P3: Nice to have
+
+Status options:
+- not_started: Haven't begun
+- in_progress: Actively working
+- completed: Done
+- paused: Temporarily stopped
+- on_hold: Waiting on external factors`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: 'Project title',
+      },
+      description: {
+        type: 'string',
+        description: 'Project description',
+      },
+      priority: {
+        type: 'string',
+        enum: ['P1', 'P2', 'P3'],
+        description: 'Priority level',
+      },
+      status: {
+        type: 'string',
+        enum: ['not_started', 'in_progress', 'completed', 'paused', 'on_hold'],
+        description: 'Project status (default: not_started)',
+      },
+      relatedGoal: {
+        type: 'string',
+        description: 'ID of related goal (optional)',
+      },
+      deadline: {
+        type: 'string',
+        description: 'Target completion date (ISO format)',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Tags for categorization',
+      },
+    },
+    required: ['title', 'priority'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const data: ProjectInput = {
+        title: String(input.title),
+        description: input.description ? String(input.description) : undefined,
+        priority: input.priority as ProjectInput['priority'],
+        status: (input.status as ProjectInput['status']) || 'not_started',
+        relatedGoal: input.relatedGoal ? String(input.relatedGoal) : undefined,
+        deadline: input.deadline ? String(input.deadline) : undefined,
+        tags: Array.isArray(input.tags) ? input.tags.map(String) : undefined,
+      };
+
+      const doc: { _type: string; [key: string]: unknown } = {
+        _type: DOCUMENT_TYPES.PROJECT,
+        title: data.title,
+        priority: data.priority,
+        status: data.status,
+      };
+      if (data.description) doc.description = data.description;
+      if (data.deadline) doc.deadline = data.deadline;
+      if (data.tags) doc.tags = data.tags;
+      if (data.relatedGoal) {
+        doc.relatedGoal = { _type: 'reference', _ref: data.relatedGoal };
+      }
+
+      const result = await client.create(doc);
+
+      return JSON.stringify({
+        success: true,
+        id: result._id,
+        message: `Project "${data.title}" created (${data.priority})`,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const queryProjectsTool: SanityTool = {
+  name: 'lifeos_query_projects',
+  description: `Query projects from LifeOS. Returns projects matching filter criteria.
+
+Filter by:
+- status: not_started, in_progress, completed, paused, on_hold
+- priority: P1, P2, P3`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['not_started', 'in_progress', 'completed', 'paused', 'on_hold', 'active', 'all'],
+        description: 'Filter by status. "active" = not_started + in_progress (default)',
+      },
+      priority: {
+        type: 'string',
+        enum: ['P1', 'P2', 'P3', 'all'],
+        description: 'Filter by priority (default: all)',
+      },
+      relatedGoal: {
+        type: 'string',
+        description: 'Filter by related goal ID',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max items to return (default: 20)',
+      },
+    },
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const status = input.status || 'active';
+      const priority = input.priority || 'all';
+      const limit = Number(input.limit) || 20;
+
+      let query = `*[_type == "${DOCUMENT_TYPES.PROJECT}"`;
+
+      // Status filter
+      if (status === 'active') {
+        query += ` && status in ["not_started", "in_progress"]`;
+      } else if (status !== 'all') {
+        query += ` && status == "${status}"`;
+      }
+
+      // Priority filter
+      if (priority !== 'all') {
+        query += ` && priority == "${priority}"`;
+      }
+
+      // Related goal filter
+      if (input.relatedGoal) {
+        query += ` && relatedGoal._ref == "${input.relatedGoal}"`;
+      }
+
+      query += `] | order(priority asc, deadline asc, _createdAt desc) [0...${limit}] {
+        _id, title, description, status, priority, deadline, tags, _createdAt,
+        "relatedGoal": relatedGoal->{_id, title, priority}
+      }`;
+
+      const results = await client.fetch<Project[]>(query);
+
+      return JSON.stringify({
+        success: true,
+        count: results.length,
+        items: results,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const updateProjectTool: SanityTool = {
+  name: 'lifeos_update_project',
+  description: `Update a project in LifeOS. Use to update status, priority, description, etc.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: {
+        type: 'string',
+        description: 'The _id of the project to update',
+      },
+      title: {
+        type: 'string',
+        description: 'Updated title',
+      },
+      description: {
+        type: 'string',
+        description: 'Updated description',
+      },
+      status: {
+        type: 'string',
+        enum: ['not_started', 'in_progress', 'completed', 'paused', 'on_hold'],
+        description: 'New status',
+      },
+      priority: {
+        type: 'string',
+        enum: ['P1', 'P2', 'P3'],
+        description: 'Updated priority',
+      },
+      deadline: {
+        type: 'string',
+        description: 'Updated deadline (ISO format)',
+      },
+      relatedGoal: {
+        type: 'string',
+        description: 'Link to goal ID',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Updated tags',
+      },
+    },
+    required: ['id'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const id = String(input.id);
+
+      const updates: Record<string, unknown> = {};
+      if (input.title) updates.title = String(input.title);
+      if (input.description) updates.description = String(input.description);
+      if (input.status) updates.status = input.status;
+      if (input.priority) updates.priority = input.priority;
+      if (input.deadline) updates.deadline = String(input.deadline);
+      if (Array.isArray(input.tags)) updates.tags = input.tags.map(String);
+      if (input.relatedGoal) {
+        updates.relatedGoal = { _type: 'reference', _ref: String(input.relatedGoal) };
+      }
+
+      const result = await client.patch(id).set(updates).commit();
+
+      return JSON.stringify({
+        success: true,
+        id: result._id,
+        message: 'Project updated',
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -766,6 +1070,10 @@ Priority levels:
         type: 'string',
         description: 'ID of related goal (optional)',
       },
+      relatedProject: {
+        type: 'string',
+        description: 'ID of related project (optional)',
+      },
       notes: {
         type: 'string',
         description: 'Additional notes',
@@ -783,10 +1091,11 @@ Priority levels:
         priority: (input.priority as TaskInput['priority']) || 'medium',
         dueDate: input.dueDate ? String(input.dueDate) : undefined,
         relatedGoal: input.relatedGoal ? String(input.relatedGoal) : undefined,
+        relatedProject: input.relatedProject ? String(input.relatedProject) : undefined,
         notes: input.notes ? String(input.notes) : undefined,
       };
 
-      // Build the document, handling the goal reference specially
+      // Build the document, handling references specially
       const doc: { _type: string; [key: string]: unknown } = {
         _type: DOCUMENT_TYPES.TASK,
         title: data.title,
@@ -797,6 +1106,9 @@ Priority levels:
       if (data.notes) doc.notes = data.notes;
       if (data.relatedGoal) {
         doc.relatedGoal = { _type: 'reference', _ref: data.relatedGoal };
+      }
+      if (data.relatedProject) {
+        doc.relatedProject = { _type: 'reference', _ref: data.relatedProject };
       }
 
       const result = await client.create(doc);
@@ -820,7 +1132,8 @@ export const queryTasksTool: SanityTool = {
 Filter by:
 - status: todo, in_progress, done, cancelled
 - priority: high, medium, low
-- dueDate: today, overdue, upcoming`,
+- dueDate: today, overdue, upcoming
+- relatedProject: filter by project ID`,
 
   input_schema: {
     type: 'object',
@@ -839,6 +1152,10 @@ Filter by:
         type: 'string',
         enum: ['today', 'overdue', 'upcoming', 'all'],
         description: 'Filter by due date: today, overdue (<today), upcoming (<=7 days)',
+      },
+      relatedProject: {
+        type: 'string',
+        description: 'Filter by project ID',
       },
       limit: {
         type: 'number',
@@ -882,6 +1199,11 @@ Filter by:
         query += ` && dueDate <= "${weekFromNow}" && dueDate >= "${today}"`;
       }
 
+      // Project filter
+      if (input.relatedProject) {
+        query += ` && relatedProject._ref == "${input.relatedProject}"`;
+      }
+
       query += `] | order(
         priority == "high" desc,
         priority == "medium" desc,
@@ -889,7 +1211,8 @@ Filter by:
         _createdAt desc
       ) [0...${limit}] {
         _id, title, status, priority, dueDate, notes, completedAt, _createdAt,
-        "relatedGoal": relatedGoal->{_id, title, priority}
+        "relatedGoal": relatedGoal->{_id, title, priority},
+        "relatedProject": relatedProject->{_id, title, priority}
       }`;
 
       const results = await client.fetch<Task[]>(query);
@@ -939,6 +1262,14 @@ export const updateTaskTool: SanityTool = {
         type: 'string',
         description: 'Updated notes',
       },
+      relatedGoal: {
+        type: 'string',
+        description: 'Link to goal ID',
+      },
+      relatedProject: {
+        type: 'string',
+        description: 'Link to project ID',
+      },
     },
     required: ['id'],
   },
@@ -960,6 +1291,12 @@ export const updateTaskTool: SanityTool = {
       if (input.priority) updates.priority = input.priority;
       if (input.dueDate) updates.dueDate = String(input.dueDate);
       if (input.notes) updates.notes = String(input.notes);
+      if (input.relatedGoal) {
+        updates.relatedGoal = { _type: 'reference', _ref: String(input.relatedGoal) };
+      }
+      if (input.relatedProject) {
+        updates.relatedProject = { _type: 'reference', _ref: String(input.relatedProject) };
+      }
 
       const result = await client.patch(id).set(updates).commit();
 
@@ -1161,6 +1498,14 @@ export const updateDecisionTool: SanityTool = {
         items: { type: 'string' },
         description: 'Updated tags',
       },
+      decidedAt: {
+        type: 'string',
+        description: 'Updated decision date (ISO format YYYY-MM-DD)',
+      },
+      relatedGoal: {
+        type: 'string',
+        description: 'Link to goal ID',
+      },
     },
     required: ['id'],
   },
@@ -1177,6 +1522,10 @@ export const updateDecisionTool: SanityTool = {
       if (input.rationale) updates.rationale = String(input.rationale);
       if (input.status) updates.status = input.status;
       if (Array.isArray(input.tags)) updates.tags = input.tags.map(String);
+      if (input.decidedAt) updates.decidedAt = String(input.decidedAt);
+      if (input.relatedGoal) {
+        updates.relatedGoal = { _type: 'reference', _ref: String(input.relatedGoal) };
+      }
 
       const result = await client.patch(id).set(updates).commit();
 
@@ -1209,6 +1558,9 @@ export const sanityTools: Record<string, SanityTool> = {
   lifeos_create_goal: createGoalTool,
   lifeos_query_goals: queryGoalsTool,
   lifeos_update_goal: updateGoalTool,
+  lifeos_create_project: createProjectTool,
+  lifeos_query_projects: queryProjectsTool,
+  lifeos_update_project: updateProjectTool,
   lifeos_create_task: createTaskTool,
   lifeos_query_tasks: queryTasksTool,
   lifeos_update_task: updateTaskTool,

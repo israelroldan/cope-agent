@@ -84,7 +84,7 @@ domains:
 
   # LifeOS - primary personal operating system (Sanity CMS backend)
   lifeos:
-    description: "LifeOS - personal operating system for tasks, goals, inbox, and open loops"
+    description: "LifeOS - personal operating system for tasks, goals, projects, inbox, open loops, and decisions"
     triggers:
       - lifeos
       - inbox
@@ -96,6 +96,14 @@ domains:
       - tasks
       - priorities
       - quick add
+      - decision
+      - decisions
+      - decided
+      - record decision
+      - project
+      - projects
+      - new project
+      - create project
     specialist: lifeos-agent
     backend: sanity
     workflows:
@@ -103,6 +111,8 @@ domains:
       - TasksToday
       - OpenLoops
       - GoalProgress
+      - RecordDecision
+      - ProjectStatus
 
   # Source of truth for Tatoma database IDs and schemas: src/config/tatoma-schema.ts
   notion_work:

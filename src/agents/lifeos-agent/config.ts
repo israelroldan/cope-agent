@@ -23,6 +23,10 @@ export const config: Pick<AgentDefinition, 'model' | 'mcpServers' | 'maxTurns' |
     'lifeos_create_goal',
     'lifeos_query_goals',
     'lifeos_update_goal',
+    // Project tools
+    'lifeos_create_project',
+    'lifeos_query_projects',
+    'lifeos_update_project',
     // Task tools
     'lifeos_create_task',
     'lifeos_query_tasks',

@@ -10,7 +10,7 @@
  * 2. Update SCHEMA_DEFINITIONS for documentation
  * 3. Add migration logic to migrateSchema() if needed
  *
- * Focused schema: Inbox, Open Loops, Goals, Tasks, Decisions.
+ * Focused schema: Inbox, Open Loops, Goals, Projects, Tasks, Decisions.
  */
 
 /**
@@ -58,6 +58,7 @@ export interface OpenLoop extends SanityDocument {
   dueDate?: string; // ISO date string
   nextAction?: string; // What to do when resolved
   context?: string; // Additional context
+  relatedProject?: { _ref: string; _type: 'reference' }; // Reference to a Project
 }
 
 /**
@@ -70,6 +71,7 @@ export interface OpenLoopInput {
   dueDate?: string;
   nextAction?: string;
   context?: string;
+  relatedProject?: string; // Project ID
 }
 
 /**
@@ -121,6 +123,7 @@ export interface Task extends SanityDocument {
   priority: 'high' | 'medium' | 'low';
   dueDate?: string; // ISO date string
   relatedGoal?: { _ref: string; _type: 'reference' }; // Reference to a Goal
+  relatedProject?: { _ref: string; _type: 'reference' }; // Reference to a Project
   notes?: string;
   completedAt?: string; // ISO date string
 }
@@ -134,6 +137,7 @@ export interface TaskInput {
   priority?: 'high' | 'medium' | 'low';
   dueDate?: string;
   relatedGoal?: string; // Goal ID
+  relatedProject?: string; // Project ID
   notes?: string;
 }
 
@@ -167,12 +171,40 @@ export interface DecisionInput {
 }
 
 /**
+ * Project - container for related tasks and work
+ */
+export interface Project extends SanityDocument {
+  _type: 'project';
+  title: string;
+  description?: string;
+  status: 'not_started' | 'in_progress' | 'completed' | 'paused' | 'on_hold';
+  priority: 'P1' | 'P2' | 'P3';
+  relatedGoal?: { _ref: string; _type: 'reference' }; // Reference to a Goal
+  deadline?: string; // ISO date string
+  tags?: string[];
+}
+
+/**
+ * Input for creating a project
+ */
+export interface ProjectInput {
+  title: string;
+  description?: string;
+  status?: 'not_started' | 'in_progress' | 'completed' | 'paused' | 'on_hold';
+  priority: 'P1' | 'P2' | 'P3';
+  relatedGoal?: string; // Goal ID
+  deadline?: string;
+  tags?: string[];
+}
+
+/**
  * Document type names for GROQ queries
  */
 export const DOCUMENT_TYPES = {
   INBOX: 'inbox',
   OPEN_LOOP: 'openLoop',
   GOAL: 'goal',
+  PROJECT: 'project',
   TASK: 'task',
   DECISION: 'decision',
 } as const;
@@ -252,6 +284,7 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
       { name: 'dueDate', type: 'date', description: 'Expected resolution date' },
       { name: 'nextAction', type: 'string', description: 'What to do when resolved' },
       { name: 'context', type: 'text', description: 'Additional context' },
+      { name: 'relatedProject', type: 'reference', to: 'project', description: 'Related project' },
     ],
   },
   {
@@ -295,6 +328,32 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
     ],
   },
   {
+    name: 'project',
+    title: 'Project',
+    description: 'Container for related tasks and work, optionally linked to a goal',
+    fields: [
+      { name: 'title', type: 'string', required: true, description: 'Project title' },
+      { name: 'description', type: 'text', description: 'Project description' },
+      {
+        name: 'status',
+        type: 'string',
+        required: true,
+        description: 'Project status',
+        options: ['not_started', 'in_progress', 'completed', 'paused', 'on_hold'],
+      },
+      {
+        name: 'priority',
+        type: 'string',
+        required: true,
+        description: 'Priority level (P1=critical, P2=important, P3=nice-to-have)',
+        options: ['P1', 'P2', 'P3'],
+      },
+      { name: 'relatedGoal', type: 'reference', to: 'goal', description: 'Related goal' },
+      { name: 'deadline', type: 'date', description: 'Target completion date' },
+      { name: 'tags', type: 'array', of: 'string', description: 'Tags for categorization' },
+    ],
+  },
+  {
     name: 'task',
     title: 'Task',
     description: 'Actionable items with priority and due dates',
@@ -316,6 +375,7 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
       },
       { name: 'dueDate', type: 'date', description: 'Due date' },
       { name: 'relatedGoal', type: 'reference', to: 'goal', description: 'Related goal' },
+      { name: 'relatedProject', type: 'reference', to: 'project', description: 'Related project' },
       { name: 'notes', type: 'text', description: 'Additional notes' },
       { name: 'completedAt', type: 'datetime', description: 'When the task was completed' },
     ],
