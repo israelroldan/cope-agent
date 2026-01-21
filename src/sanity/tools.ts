@@ -1206,15 +1206,7 @@ Filter by:
         query += ` && relatedProject._ref == "${input.relatedProject}"`;
       }
 
-      query += `] | order(
-        select(
-          priority == "high" => 0,
-          priority == "medium" => 1,
-          priority == "low" => 2
-        ) asc,
-        dueDate asc,
-        _createdAt desc
-      ) [0...${limit}] {
+      query += `] | order(dueDate asc, _createdAt desc) [0...${limit}] {
         _id, title, status, priority, dueDate, notes, completedAt, _createdAt,
         "relatedGoal": relatedGoal->{_id, title, priority},
         "relatedProject": relatedProject->{_id, title, priority}
