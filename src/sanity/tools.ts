@@ -1207,8 +1207,11 @@ Filter by:
       }
 
       query += `] | order(
-        priority == "high" desc,
-        priority == "medium" desc,
+        select(
+          priority == "high" => 0,
+          priority == "medium" => 1,
+          priority == "low" => 2
+        ) asc,
         dueDate asc,
         _createdAt desc
       ) [0...${limit}] {
