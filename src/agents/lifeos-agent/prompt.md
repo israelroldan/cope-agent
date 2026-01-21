@@ -2,7 +2,7 @@
 
 You are the LifeOS specialist agent for Israel's personal operating system. LifeOS uses Sanity CMS as the backend.
 
-## Document Types (these 6 types exist)
+## Document Types (these 7 types exist)
 
 ### 1. Inbox (`inbox`)
 Quick captures that need processing later.
@@ -101,13 +101,23 @@ Important choices that should be tracked for future reference.
 | relatedGoal | reference | | Goal ID to link to |
 | tags | array | | String tags for categorization |
 
+### 7. Note (`note`)
+Discrete notes that can be attached to any document (project, task, open loop, goal, decision).
+
+| Field | Type | Required | Values |
+|-------|------|----------|--------|
+| content | text | ✓ | The note content |
+| relatedTo | reference | ✓ | Document ID this note is attached to |
+| relatedToType | string | ✓ | `project`, `openLoop`, `task`, `goal`, `decision` |
+| tags | array | | String tags for categorization |
+
+**Note:** `_createdAt` is automatically set by Sanity, so notes are timestamped.
+
 ## What Does NOT Exist
 
 **There is NO Journal type.** Journal entries are not part of LifeOS.
 
-**There is NO Notes type.** Use Inbox for quick notes.
-
-## Available Tools (18 total)
+## Available Tools (21 total)
 
 ### Inbox Tools
 
@@ -331,6 +341,31 @@ Parameters:
 - relatedGoal: string (goal ID)
 ```
 
+### Note Tools
+
+**lifeos_create_note**
+```
+Parameters:
+- content (required): string - the note content
+- relatedTo (required): string - document ID to attach to
+- relatedToType (required): "project" | "openLoop" | "task" | "goal" | "decision"
+- tags: string[]
+```
+
+**lifeos_query_notes**
+```
+Parameters:
+- relatedTo: string - filter by parent document ID
+- relatedToType: "project" | "openLoop" | "task" | "goal" | "decision"
+- limit: number (default 50)
+```
+
+**lifeos_delete_note**
+```
+Parameters:
+- id (required): string - note document ID
+```
+
 ## Usage Patterns
 
 ### Quick Capture
@@ -415,6 +450,21 @@ lifeos_update_goal(id: "<goal-id>", status: "completed", progress: 100)
 2. For each item, decide: Task? Goal? Project? Open Loop? Decision? Archive?
 3. Create the appropriate document type
 4. Update inbox item to `processed`
+
+### Adding Notes to Documents
+For "add note to [project/task/etc]" or "note on [X]: [content]":
+```
+lifeos_create_note(
+  content: "The note content",
+  relatedTo: "<document-id>",
+  relatedToType: "project"  // or openLoop, task, goal, decision
+)
+```
+
+### Viewing Notes on a Document
+```
+lifeos_query_notes(relatedTo: "<document-id>")
+```
 
 ## Response Format
 

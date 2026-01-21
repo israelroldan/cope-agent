@@ -171,6 +171,27 @@ export interface DecisionInput {
 }
 
 /**
+ * Note - discrete notes that can be attached to any document
+ */
+export interface Note extends SanityDocument {
+  _type: 'note';
+  content: string;
+  relatedTo: { _ref: string; _type: 'reference' };
+  relatedToType: 'project' | 'openLoop' | 'task' | 'goal' | 'decision';
+  tags?: string[];
+}
+
+/**
+ * Input for creating a note
+ */
+export interface NoteInput {
+  content: string;
+  relatedTo: string; // Document ID to attach to
+  relatedToType: 'project' | 'openLoop' | 'task' | 'goal' | 'decision';
+  tags?: string[];
+}
+
+/**
  * Project - container for related tasks and work
  */
 export interface Project extends SanityDocument {
@@ -207,6 +228,7 @@ export const DOCUMENT_TYPES = {
   PROJECT: 'project',
   TASK: 'task',
   DECISION: 'decision',
+  NOTE: 'note',
 } as const;
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[keyof typeof DOCUMENT_TYPES];
@@ -398,6 +420,29 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
       },
       { name: 'decidedAt', type: 'date', description: 'When the decision was made' },
       { name: 'relatedGoal', type: 'reference', to: 'goal', description: 'Related goal' },
+      { name: 'tags', type: 'array', of: 'string', description: 'Tags for categorization' },
+    ],
+  },
+  {
+    name: 'note',
+    title: 'Note',
+    description: 'Discrete notes that can be attached to any document (project, task, open loop, goal, decision)',
+    fields: [
+      { name: 'content', type: 'text', required: true, description: 'Note content' },
+      {
+        name: 'relatedTo',
+        type: 'reference',
+        to: 'project|openLoop|task|goal|decision',
+        required: true,
+        description: 'The document this note is attached to',
+      },
+      {
+        name: 'relatedToType',
+        type: 'string',
+        required: true,
+        description: 'Type of the related document',
+        options: ['project', 'openLoop', 'task', 'goal', 'decision'],
+      },
       { name: 'tags', type: 'array', of: 'string', description: 'Tags for categorization' },
     ],
   },

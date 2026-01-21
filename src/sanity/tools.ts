@@ -2,7 +2,7 @@
  * LifeOS Sanity Tools
  *
  * CRUD tools for LifeOS data in Sanity CMS.
- * 15 tools: 3 per document type (create, query, update).
+ * 21 tools: 3 per document type (create, query, update/delete).
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
@@ -20,6 +20,8 @@ import type {
   TaskInput,
   Decision,
   DecisionInput,
+  Note,
+  NoteInput,
 } from './schema.js';
 import { DOCUMENT_TYPES } from './schema.js';
 
@@ -1542,6 +1544,170 @@ export const updateDecisionTool: SanityTool = {
 };
 
 // ============================================================================
+// NOTE TOOLS
+// ============================================================================
+
+export const createNoteTool: SanityTool = {
+  name: 'lifeos_create_note',
+  description: `Create a new note attached to a document in LifeOS.
+
+Use to add discrete notes to projects, tasks, open loops, goals, or decisions.
+Each note is timestamped via _createdAt.
+
+Example: "Add a note to the project about the API change"`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      content: {
+        type: 'string',
+        description: 'The note content',
+      },
+      relatedTo: {
+        type: 'string',
+        description: 'The _id of the document to attach this note to',
+      },
+      relatedToType: {
+        type: 'string',
+        enum: ['project', 'openLoop', 'task', 'goal', 'decision'],
+        description: 'The type of document this note is attached to',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional tags for categorization',
+      },
+    },
+    required: ['content', 'relatedTo', 'relatedToType'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const data: NoteInput = {
+        content: String(input.content),
+        relatedTo: String(input.relatedTo),
+        relatedToType: input.relatedToType as NoteInput['relatedToType'],
+        tags: Array.isArray(input.tags) ? input.tags.map(String) : undefined,
+      };
+
+      const doc: { _type: string; [key: string]: unknown } = {
+        _type: DOCUMENT_TYPES.NOTE,
+        content: data.content,
+        relatedTo: { _type: 'reference', _ref: data.relatedTo },
+        relatedToType: data.relatedToType,
+      };
+      if (data.tags) doc.tags = data.tags;
+
+      const result = await client.create(doc);
+
+      return JSON.stringify({
+        success: true,
+        id: result._id,
+        message: `Note added to ${data.relatedToType}`,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const queryNotesTool: SanityTool = {
+  name: 'lifeos_query_notes',
+  description: `Query notes from LifeOS. Returns notes attached to documents.
+
+Filter by:
+- relatedTo: Get all notes for a specific document ID
+- relatedToType: Get all notes for a document type (project, task, etc.)`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      relatedTo: {
+        type: 'string',
+        description: 'Filter by parent document ID',
+      },
+      relatedToType: {
+        type: 'string',
+        enum: ['project', 'openLoop', 'task', 'goal', 'decision'],
+        description: 'Filter by parent document type',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max items to return (default: 50)',
+      },
+    },
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const limit = Number(input.limit) || 50;
+
+      let query = `*[_type == "${DOCUMENT_TYPES.NOTE}"`;
+
+      if (input.relatedTo) {
+        query += ` && relatedTo._ref == "${input.relatedTo}"`;
+      }
+
+      if (input.relatedToType) {
+        query += ` && relatedToType == "${input.relatedToType}"`;
+      }
+
+      query += `] | order(_createdAt desc) [0...${limit}] {
+        _id, content, relatedToType, tags, _createdAt,
+        "relatedTo": relatedTo->{_id, title}
+      }`;
+
+      const results = await client.fetch<Note[]>(query);
+
+      return JSON.stringify({
+        success: true,
+        count: results.length,
+        items: results,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const deleteNoteTool: SanityTool = {
+  name: 'lifeos_delete_note',
+  description: `Delete a note from LifeOS.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: {
+        type: 'string',
+        description: 'The _id of the note to delete',
+      },
+    },
+    required: ['id'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const id = String(input.id);
+
+      await client.delete(id);
+
+      return JSON.stringify({
+        success: true,
+        message: 'Note deleted',
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+// ============================================================================
 // TOOL REGISTRY
 // ============================================================================
 
@@ -1567,6 +1733,9 @@ export const sanityTools: Record<string, SanityTool> = {
   lifeos_create_decision: createDecisionTool,
   lifeos_query_decisions: queryDecisionsTool,
   lifeos_update_decision: updateDecisionTool,
+  lifeos_create_note: createNoteTool,
+  lifeos_query_notes: queryNotesTool,
+  lifeos_delete_note: deleteNoteTool,
 };
 
 /**
