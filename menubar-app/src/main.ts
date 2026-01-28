@@ -290,6 +290,38 @@ function stopStudio(): void {
   }
 }
 
+// Launch COPE Agent dev mode in Terminal.app
+function launchAgentInTerminal(): void {
+  const copeAgentPath = isDev
+    ? path.join(__dirname, '..', '..')
+    : path.join(resourcesPath, '..');
+
+  const script = `
+    tell application "Terminal"
+      activate
+      do script "cd '${copeAgentPath}' && npm run dev"
+    end tell
+  `;
+
+  spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true });
+}
+
+// Launch "cope" CLI in iTerm
+// The cope alias is expected to be available in the user's shell
+function launchCopeInITerm(): void {
+  const script = `
+    tell application "iTerm"
+      activate
+      create window with default profile
+      tell current session of current window
+        write text "cope"
+      end tell
+    end tell
+  `;
+
+  spawn('osascript', ['-e', script], { stdio: 'ignore', detached: true });
+}
+
 // Open the studio in browser
 async function openStudio(): Promise<void> {
   if (!isStudioRunning) {
@@ -436,6 +468,15 @@ function updateTrayMenu(): void {
             click: () => stopStudio()
           }
         ]
+      },
+      { type: 'separator' },
+      {
+        label: 'Launch Agent (Terminal)',
+        click: () => launchAgentInTerminal()
+      },
+      {
+        label: 'Launch COPE CLI (iTerm)',
+        click: () => launchCopeInITerm()
       },
       { type: 'separator' },
       {
