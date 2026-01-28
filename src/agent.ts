@@ -11,6 +11,7 @@ import { getOrchestratorSystemPrompt, getTimeBasedPrompt } from './core/identity
 import { getCapabilitySummary } from './core/manifest.js';
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool, spawnSpecialist, spawnParallel } from './tools/spawn.js';
+import { setTimerTool, cancelTimerTool, executeUtilityTool } from './tools/utilities.js';
 import { getAgentDebugClient } from './debug/index.js';
 
 // Debug client for orchestrator events
@@ -135,6 +136,16 @@ const orchestratorTools: Anthropic.Tool[] = [
     description: spawnParallelTool.description,
     input_schema: spawnParallelTool.input_schema as Anthropic.Tool.InputSchema,
   },
+  {
+    name: 'set_timer',
+    description: setTimerTool.description,
+    input_schema: setTimerTool.input_schema as Anthropic.Tool.InputSchema,
+  },
+  {
+    name: 'cancel_timer',
+    description: cancelTimerTool.description,
+    input_schema: cancelTimerTool.input_schema as Anthropic.Tool.InputSchema,
+  },
 ];
 
 /**
@@ -168,6 +179,12 @@ async function executeTool(
       const args = toolInput as { tasks: Array<{ specialist: string; task: string; context?: string }> };
       const results = await spawnParallel(args.tasks, parentRequestId);
       return JSON.stringify(results, null, 2);
+    }
+
+    case 'set_timer':
+    case 'cancel_timer': {
+      const result = await executeUtilityTool(toolName, toolInput);
+      return result ?? JSON.stringify({ success: false, error: 'Timer tool not found' });
     }
 
     default:

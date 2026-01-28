@@ -16,6 +16,18 @@ let isServerRunning = false;
 let isStudioRunning = false;
 let debugWindow: BrowserWindow | null = null;
 
+// Timer state (synced from server) - supports multiple timers
+interface TimerInfo {
+  id: string;
+  label: string;
+  endTime: number;
+  remainingMs: number;
+}
+let activeTimers: TimerInfo[] = [];
+let previousTimerIds: Set<string> = new Set(); // Track which timers we knew about
+let timerPollInterval: NodeJS.Timeout | null = null;
+let timerAlertWindows: BrowserWindow[] = []; // One window per display
+
 // Studio port - use a private/ephemeral port to avoid conflicts
 // (54321 conflicts with Supabase default)
 const STUDIO_PORT = 64321;
@@ -161,6 +173,7 @@ async function startServer(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (await checkServerHealth()) {
       isServerRunning = true;
+      startTimerPolling();
       updateTrayMenu();
       return;
     }
@@ -173,6 +186,7 @@ async function startServer(): Promise<void> {
 // Stop the server
 function stopServer(): void {
   if (serverProcess) {
+    stopTimerPolling();
     serverProcess.kill('SIGTERM');
     serverProcess = null;
     isServerRunning = false;
@@ -197,6 +211,290 @@ async function checkStudioHealth(): Promise<boolean> {
     req.on('timeout', () => {
       req.destroy();
       resolve(false);
+    });
+
+    req.end();
+  });
+}
+
+// ============================================================================
+// Timer Functions
+// ============================================================================
+
+/**
+ * Format milliseconds as MM:SS or H:MM:SS
+ */
+function formatTime(ms: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Update the tray title with timer countdown
+ * Shows closest timer + "(+X)" if there are more
+ */
+function updateTrayTitle(): void {
+  if (!tray) return;
+
+  // Filter to only active timers (remaining > 0)
+  const runningTimers = activeTimers.filter(t => t.remainingMs > 0);
+
+  if (runningTimers.length === 0) {
+    tray.setTitle('');
+    return;
+  }
+
+  // Sort by soonest first
+  runningTimers.sort((a, b) => a.endTime - b.endTime);
+  const closest = runningTimers[0];
+  const remaining = runningTimers.length - 1;
+
+  let title = formatTime(closest.remainingMs);
+  if (remaining > 0) {
+    title += ` (+${remaining})`;
+  }
+
+  tray.setTitle(title);
+}
+
+/**
+ * Poll timer state from server
+ */
+async function pollTimerState(): Promise<void> {
+  if (!isServerRunning) return;
+
+  return new Promise((resolve) => {
+    const protocol = fs.existsSync(path.join(certsPath, 'localhost+2.pem')) ? https : http;
+
+    const req = protocol.request({
+      hostname: 'localhost',
+      port: 3847,
+      path: '/timer',
+      method: 'GET',
+      rejectUnauthorized: false,
+      timeout: 2000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const response = JSON.parse(data) as {
+            count: number;
+            timers: TimerInfo[];
+          };
+
+          const newTimers = response.timers || [];
+          const newTimerIds = new Set(newTimers.map(t => t.id));
+
+          // Check for expired timers (were in previous list, now either gone or remainingMs <= 0)
+          for (const prevId of previousTimerIds) {
+            const currentTimer = newTimers.find(t => t.id === prevId);
+            // Timer expired if it was active before and now has remainingMs <= 0
+            if (currentTimer && currentTimer.remainingMs <= 0) {
+              showTimerAlert(currentTimer.label || 'Timer complete');
+              // Cancel this specific timer on the server
+              cancelTimerViaApi(prevId);
+            }
+          }
+
+          // Update state - only keep timers with remaining time
+          activeTimers = newTimers.filter(t => t.remainingMs > 0);
+          previousTimerIds = new Set(activeTimers.map(t => t.id));
+
+          updateTrayTitle();
+          updateTrayMenu();
+        } catch {
+          // Ignore parse errors
+        }
+        resolve();
+      });
+    });
+
+    req.on('error', () => resolve());
+    req.on('timeout', () => {
+      req.destroy();
+      resolve();
+    });
+
+    req.end();
+  });
+}
+
+/**
+ * Start polling timer state
+ */
+function startTimerPolling(): void {
+  if (timerPollInterval) return;
+
+  // Poll every second
+  timerPollInterval = setInterval(() => {
+    pollTimerState();
+  }, 1000);
+
+  // Initial poll
+  pollTimerState();
+}
+
+/**
+ * Stop polling timer state
+ */
+function stopTimerPolling(): void {
+  if (timerPollInterval) {
+    clearInterval(timerPollInterval);
+    timerPollInterval = null;
+  }
+  activeTimers = [];
+  previousTimerIds.clear();
+  updateTrayTitle();
+}
+
+/**
+ * Show full-screen timer alert as overlay on ALL screens
+ */
+function showTimerAlert(label: string): void {
+  if (timerAlertWindows.length > 0) {
+    timerAlertWindows[0]?.focus();
+    return;
+  }
+
+  const alertHtmlPath = isDev
+    ? path.join(__dirname, '..', 'assets', 'timer-alert.html')
+    : path.join(resourcesPath, 'assets', 'timer-alert.html');
+
+  // Get all displays
+  const { screen } = require('electron');
+  const displays = screen.getAllDisplays();
+
+  // Show dock icon so user notices
+  if (process.platform === 'darwin') {
+    app.dock?.show();
+    const dockIconPath = isDev
+      ? path.join(__dirname, '..', 'assets', 'AppIcon.png')
+      : path.join(resourcesPath, 'assets', 'AppIcon.png');
+    if (fs.existsSync(dockIconPath)) {
+      app.dock?.setIcon(dockIconPath);
+    }
+  }
+
+  // Create a window for each display
+  for (const display of displays) {
+    const { x, y, width, height } = display.bounds;
+
+    const timerPreloadPath = isDev
+      ? path.join(__dirname, 'timer-preload.js')
+      : path.join(resourcesPath, 'app', 'timer-preload.js');
+
+    const alertWindow = new BrowserWindow({
+      x,
+      y,
+      width,
+      height,
+      frame: false,
+      skipTaskbar: true,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      closable: true,
+      focusable: true,
+      hasShadow: false,
+      transparent: true,
+      type: 'panel',
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        preload: timerPreloadPath,
+      },
+    });
+
+    // Show on all workspaces and float above other windows
+    alertWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    alertWindow.setAlwaysOnTop(true, 'floating');
+
+    // Load with label as query parameter
+    alertWindow.loadFile(alertHtmlPath, {
+      query: { label: label }
+    });
+
+    timerAlertWindows.push(alertWindow);
+  }
+
+  // Play system alert sound (once)
+  spawn('afplay', ['/System/Library/Sounds/Glass.aiff'], { stdio: 'ignore', detached: true });
+}
+
+/**
+ * Dismiss all timer alert windows with fade out
+ */
+function dismissTimerAlert(): void {
+  // Tell all windows to fade out
+  for (const win of timerAlertWindows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('timer-fade-out');
+    }
+  }
+
+  // Update UI
+  updateTrayTitle();
+  updateTrayMenu();
+
+  // Close all windows after fade animation completes
+  setTimeout(() => {
+    for (const win of timerAlertWindows) {
+      if (!win.isDestroyed()) {
+        win.destroy();
+      }
+    }
+    timerAlertWindows = [];
+    if (process.platform === 'darwin') {
+      app.dock?.hide();
+    }
+  }, 500);
+}
+
+/**
+ * Cancel timer via API
+ * @param timerId Optional: specific timer to cancel. If not provided, cancels all.
+ */
+async function cancelTimerViaApi(timerId?: string): Promise<void> {
+  return new Promise((resolve) => {
+    const protocol = fs.existsSync(path.join(certsPath, 'localhost+2.pem')) ? https : http;
+    const timerPath = timerId ? `/timer/${timerId}` : '/timer';
+
+    const req = protocol.request({
+      hostname: 'localhost',
+      port: 3847,
+      path: timerPath,
+      method: 'DELETE',
+      rejectUnauthorized: false,
+      timeout: 2000
+    }, () => {
+      if (timerId) {
+        // Remove specific timer from local state
+        activeTimers = activeTimers.filter(t => t.id !== timerId);
+        previousTimerIds.delete(timerId);
+      } else {
+        // Clear all timers
+        activeTimers = [];
+        previousTimerIds.clear();
+      }
+      updateTrayTitle();
+      updateTrayMenu();
+      resolve();
+    });
+
+    req.on('error', () => resolve());
+    req.on('timeout', () => {
+      req.destroy();
+      resolve();
     });
 
     req.end();
@@ -391,11 +689,43 @@ function updateTrayMenu(): void {
   const statusIcon = isServerRunning ? '🟢' : '⚪';
 
   autoLauncher.isEnabled().then((isEnabled) => {
+    // Build timer menu items for all active timers
+    const runningTimers = activeTimers.filter(t => t.remainingMs > 0)
+      .sort((a, b) => a.endTime - b.endTime);
+
+    const timerMenuItems: Electron.MenuItemConstructorOptions[] = runningTimers.length > 0
+      ? [
+          { type: 'separator' },
+          {
+            label: `⏱ Timers (${runningTimers.length})`,
+            enabled: false
+          },
+          ...runningTimers.map(timer => {
+            const endDate = new Date(timer.endTime);
+            const endTimeStr = endDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            return {
+              label: `   ${endTimeStr} - ${timer.label}`,
+              submenu: [
+                {
+                  label: 'Cancel this timer',
+                  click: () => cancelTimerViaApi(timer.id)
+                }
+              ] as Electron.MenuItemConstructorOptions[]
+            };
+          }),
+          {
+            label: 'Cancel All Timers',
+            click: () => cancelTimerViaApi()
+          },
+        ]
+      : [];
+
     const contextMenu = Menu.buildFromTemplate([
       {
         label: `COPE Agent - ${statusText}`,
         enabled: false
       },
+      ...timerMenuItems,
       { type: 'separator' },
       {
         label: isServerRunning ? 'Stop Server' : 'Start Server',
@@ -583,6 +913,17 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('get-studio-status', () => {
     return { running: isStudioRunning, port: STUDIO_PORT };
+  });
+
+  // IPC handlers for timer alert
+  ipcMain.handle('dismiss-timer-alert', () => {
+    dismissTimerAlert();
+    return { success: true };
+  });
+
+  // Listen for timer dismiss from any alert window
+  ipcMain.on('timer-dismiss', () => {
+    dismissTimerAlert();
   });
 });
 

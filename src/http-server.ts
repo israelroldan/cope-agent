@@ -22,7 +22,7 @@
 
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'http';
 import { createServer as createHttpsServer } from 'https';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
@@ -36,6 +36,7 @@ import { randomUUID } from 'crypto';
 
 import { discoverCapabilityTool } from './tools/discover.js';
 import { spawnSpecialistTool, spawnParallelTool } from './tools/spawn.js';
+import { setTimerTool, cancelTimerTool, executeUtilityTool } from './tools/utilities.js';
 import { loadCredentialsIntoEnv } from './config/index.js';
 import { getHttpDebugClient } from './debug/index.js';
 import type { DebugEvent, DebugEventType } from './debug/index.js';
@@ -157,6 +158,16 @@ function createMcpServer(): Server {
         description: spawnParallelTool.description,
         inputSchema: spawnParallelTool.input_schema,
       },
+      {
+        name: 'set_timer',
+        description: setTimerTool.description,
+        inputSchema: setTimerTool.input_schema,
+      },
+      {
+        name: 'cancel_timer',
+        description: cancelTimerTool.description,
+        inputSchema: cancelTimerTool.input_schema,
+      },
     ];
     debugLog('response', { method: 'tools/list', data: { count: tools.length } });
     return { tools };
@@ -189,6 +200,13 @@ function createMcpServer(): Server {
             tasks: Array<{ specialist: string; task: string; context?: string }>;
           };
           result = await spawnParallelTool.execute(parallelArgs);
+          break;
+        }
+
+        case 'set_timer':
+        case 'cancel_timer': {
+          const timerResult = await executeUtilityTool(name, args as Record<string, unknown>);
+          result = timerResult ?? JSON.stringify({ error: 'Timer tool not found' });
           break;
         }
 
@@ -226,6 +244,79 @@ const transports = new Map<string, StreamableHTTPServerTransport>();
 
 // Store servers by session ID (to keep them alive)
 const servers = new Map<string, Server>();
+
+// ============================================================================
+// Timer State
+// ============================================================================
+
+interface TimerState {
+  id: string;           // Unique timer ID
+  endTime: number;      // Unix timestamp when timer ends
+  label: string;        // What to display when timer expires
+  durationMs: number;   // Original duration
+  createdAt: number;    // When timer was created
+}
+
+// Store multiple timers by ID
+const activeTimers = new Map<string, TimerState>();
+
+// Timer persistence file path
+const TIMERS_FILE = join(
+  process.env.HOME || process.env.USERPROFILE || '.',
+  '.config',
+  'cope-agent',
+  'timers.json'
+);
+
+// Generate a short unique ID
+function generateTimerId(): string {
+  return Math.random().toString(36).substring(2, 8);
+}
+
+/**
+ * Save timers to persistent storage
+ */
+function saveTimers(): void {
+  try {
+    const timers = Array.from(activeTimers.values());
+    const dir = dirname(TIMERS_FILE);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(TIMERS_FILE, JSON.stringify(timers, null, 2));
+  } catch (error) {
+    console.error('Failed to save timers:', error);
+  }
+}
+
+/**
+ * Load timers from persistent storage
+ */
+function loadTimers(): void {
+  try {
+    if (!existsSync(TIMERS_FILE)) return;
+
+    const data = readFileSync(TIMERS_FILE, 'utf-8');
+    const timers = JSON.parse(data) as TimerState[];
+    const now = Date.now();
+
+    // Only load timers that haven't expired
+    for (const timer of timers) {
+      if (timer.endTime > now) {
+        activeTimers.set(timer.id, timer);
+      }
+    }
+
+    // Clean up expired timers from file
+    if (activeTimers.size !== timers.length) {
+      saveTimers();
+    }
+
+    console.log(`Loaded ${activeTimers.size} active timer(s)`);
+  } catch (error) {
+    console.error('Failed to load timers:', error);
+  }
+}
 
 /**
  * Read and parse request body
@@ -279,6 +370,130 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
       endpoint: `${protocol}://localhost:${PORT}/mcp`,
       debug: `${protocol}://localhost:${PORT}/debug`,
     }));
+    return;
+  }
+
+  // Timer endpoints - support multiple timers
+  // GET /timer - list all timers
+  // POST /timer - create new timer
+  // DELETE /timer - cancel all timers
+  // DELETE /timer/:id - cancel specific timer
+  if (url.pathname === '/timer' || url.pathname.startsWith('/timer/')) {
+    const timerId = url.pathname.startsWith('/timer/') ? url.pathname.slice(7) : null;
+
+    // GET: Get all active timers
+    if (req.method === 'GET') {
+      const now = Date.now();
+      const timers = Array.from(activeTimers.values())
+        .map(t => ({
+          id: t.id,
+          label: t.label,
+          endTime: t.endTime,
+          durationMs: t.durationMs,
+          remainingMs: Math.max(0, t.endTime - now),
+          createdAt: t.createdAt,
+        }))
+        .sort((a, b) => a.endTime - b.endTime); // Sort by soonest first
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        count: timers.length,
+        timers,
+      }));
+      return;
+    }
+
+    // POST: Create a new timer
+    if (req.method === 'POST') {
+      try {
+        const body = await parseRequestBody(req) as {
+          minutes?: number;
+          seconds?: number;
+          label: string;
+        };
+
+        if (!body || !body.label) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required field: label' }));
+          return;
+        }
+
+        // Calculate duration in milliseconds
+        let durationMs = 0;
+        if (body.minutes) {
+          durationMs += body.minutes * 60 * 1000;
+        }
+        if (body.seconds) {
+          durationMs += body.seconds * 1000;
+        }
+
+        if (durationMs <= 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Timer duration must be positive. Provide minutes and/or seconds.' }));
+          return;
+        }
+
+        const now = Date.now();
+        const id = generateTimerId();
+        const timer: TimerState = {
+          id,
+          endTime: now + durationMs,
+          label: body.label,
+          durationMs,
+          createdAt: now,
+        };
+
+        activeTimers.set(id, timer);
+        saveTimers();
+        debugLog('request', { method: 'timer/set', data: { id, label: body.label, durationMs } });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          timer: {
+            id: timer.id,
+            endTime: timer.endTime,
+            label: timer.label,
+            durationMs: timer.durationMs,
+          },
+        }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }));
+      }
+      return;
+    }
+
+    // DELETE: Cancel timer(s)
+    if (req.method === 'DELETE') {
+      if (timerId) {
+        // Cancel specific timer
+        const timer = activeTimers.get(timerId);
+        if (timer) {
+          debugLog('request', { method: 'timer/cancel', data: { id: timerId, label: timer.label } });
+          activeTimers.delete(timerId);
+          saveTimers();
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: `Timer '${timer.label}' cancelled`, id: timerId }));
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: `Timer not found: ${timerId}` }));
+        }
+      } else {
+        // Cancel all timers
+        const count = activeTimers.size;
+        debugLog('request', { method: 'timer/cancel-all', data: { count } });
+        activeTimers.clear();
+        saveTimers();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: `Cancelled ${count} timer(s)`, count }));
+      }
+      return;
+    }
+
+    // Method not allowed for /timer
+    res.writeHead(405, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Method not allowed. Use GET, POST, or DELETE.' }));
     return;
   }
 
@@ -466,6 +681,9 @@ const server = useHttps
         }
       });
     });
+
+// Load persisted timers before starting
+loadTimers();
 
 // Start server
 server.listen(PORT, () => {

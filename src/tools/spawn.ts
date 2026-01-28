@@ -277,7 +277,7 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
         toolsUsed.push(toolUse.name);
 
         // Try utility tool first, then Sanity, then MCP
-        let result = executeUtilityTool(
+        let result = await executeUtilityTool(
           toolUse.name,
           toolUse.input as Record<string, unknown>
         );
@@ -300,12 +300,12 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
         }
 
         // Debug: specialist tool result
-        debug.specialistToolResult(requestId, specialist, toolUse.name, result);
+        debug.specialistToolResult(requestId, specialist, toolUse.name, result ?? '');
 
         toolResults.push({
           type: 'tool_result',
           tool_use_id: toolUse.id,
-          content: result,
+          content: result ?? '',
         });
       }
 

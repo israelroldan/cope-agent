@@ -11,7 +11,7 @@ export interface UtilityTool {
   name: string;
   description: string;
   input_schema: Anthropic.Tool.InputSchema;
-  execute: (input: Record<string, unknown>) => string;
+  execute: (input: Record<string, unknown>) => string | Promise<string>;
 }
 
 /**
@@ -156,12 +156,202 @@ Use the 'pattern' parameter to specify which number to extract if there are mult
   },
 };
 
+import * as https from 'https';
+
+// Timer API configuration
+const TIMER_HOST = 'localhost';
+const TIMER_PORT = 3847;
+
+/**
+ * Make an HTTPS request to the timer API, handling self-signed certs
+ */
+function timerRequest(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  return new Promise((resolve, reject) => {
+    const bodyStr = body ? JSON.stringify(body) : undefined;
+
+    const req = https.request({
+      hostname: TIMER_HOST,
+      port: TIMER_PORT,
+      path,
+      method,
+      rejectUnauthorized: false, // Allow self-signed certs
+      headers: bodyStr ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(bodyStr),
+      } : undefined,
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const parsed = data ? JSON.parse(data) : {};
+          resolve({
+            ok: res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode || 0,
+            data: parsed,
+          });
+        } catch {
+          resolve({ ok: false, status: res.statusCode || 0, data: { error: 'Invalid JSON response' } });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+
+    if (bodyStr) {
+      req.write(bodyStr);
+    }
+    req.end();
+  });
+}
+
+/**
+ * Set a countdown timer that displays in the COPE menubar app
+ */
+export const setTimerTool: UtilityTool = {
+  name: 'set_timer',
+  description: `Set a countdown timer that displays in the COPE menubar app.
+
+When the timer expires, a full-screen alert appears to get the user's attention.
+Use this for:
+- Pomodoro/focus sessions (e.g., "25 minutes for deep work")
+- Reminders ("10 minutes until meeting")
+- Time-boxing tasks ("15 minutes to review emails")
+
+The timer countdown appears in the macOS menu bar next to the COPE icon.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      minutes: {
+        type: 'number',
+        description: 'Timer duration in minutes (use this OR seconds, or both)',
+      },
+      seconds: {
+        type: 'number',
+        description: 'Timer duration in seconds (use this OR minutes, or both)',
+      },
+      label: {
+        type: 'string',
+        description: 'Label shown when timer expires (e.g., "Time to take a break")',
+      },
+    },
+    required: ['label'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    const { minutes, seconds, label } = input as {
+      minutes?: number;
+      seconds?: number;
+      label: string;
+    };
+
+    try {
+      const response = await timerRequest('POST', '/timer', { minutes, seconds, label });
+
+      const data = response.data as {
+        error?: string;
+        timer?: { id: string; endTime: number };
+      };
+
+      if (!response.ok) {
+        return JSON.stringify({ success: false, error: data.error || 'Failed to set timer' });
+      }
+
+      // Calculate human-readable duration
+      const totalSeconds = (minutes || 0) * 60 + (seconds || 0);
+      const mins = Math.floor(totalSeconds / 60);
+      const secs = totalSeconds % 60;
+      const durationStr = mins > 0
+        ? secs > 0 ? `${mins}m ${secs}s` : `${mins}m`
+        : `${secs}s`;
+
+      return JSON.stringify({
+        success: true,
+        message: `Timer set for ${durationStr}: "${label}"`,
+        timerId: data.timer?.id,
+        endTime: data.timer?.endTime,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({
+        success: false,
+        error: `Failed to set timer: ${msg}. Is the COPE server running?`,
+      });
+    }
+  },
+};
+
+/**
+ * Cancel running timer(s)
+ */
+export const cancelTimerTool: UtilityTool = {
+  name: 'cancel_timer',
+  description: `Cancel running timer(s).
+- Without timerId: cancels ALL running timers
+- With timerId: cancels only the specified timer
+
+Use when user wants to stop a timer before it expires.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      timerId: {
+        type: 'string',
+        description: 'Optional: ID of specific timer to cancel. If not provided, cancels all timers.',
+      },
+    },
+    required: [],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    const { timerId } = input as { timerId?: string };
+
+    try {
+      const path = timerId ? `/timer/${timerId}` : '/timer';
+      const response = await timerRequest('DELETE', path);
+
+      const data = response.data as {
+        error?: string;
+        message?: string;
+        count?: number;
+      };
+
+      if (!response.ok) {
+        return JSON.stringify({ success: false, error: data.error || 'Failed to cancel timer' });
+      }
+
+      return JSON.stringify({
+        success: true,
+        message: data.message || 'Timer(s) cancelled',
+        cancelledCount: data.count,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({
+        success: false,
+        error: `Failed to cancel timer: ${msg}. Is the COPE server running?`,
+      });
+    }
+  },
+};
+
 /**
  * Registry of all utility tools
  */
 export const utilityTools: Record<string, UtilityTool> = {
   count_items: countItemsTool,
   extract_number: extractNumberTool,
+  set_timer: setTimerTool,
+  cancel_timer: cancelTimerTool,
 };
 
 /**
@@ -185,13 +375,13 @@ export function utilityToolsToAnthropicTools(tools: UtilityTool[]): Anthropic.To
 }
 
 /**
- * Execute a utility tool
+ * Execute a utility tool (supports both sync and async tools)
  */
-export function executeUtilityTool(
+export async function executeUtilityTool(
   toolName: string,
   toolInput: Record<string, unknown>
-): string | null {
+): Promise<string | null> {
   const tool = utilityTools[toolName];
   if (!tool) return null;
-  return tool.execute(toolInput);
+  return await tool.execute(toolInput);
 }
