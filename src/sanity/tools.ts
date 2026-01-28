@@ -22,6 +22,8 @@ import type {
   DecisionInput,
   Note,
   NoteInput,
+  Timer,
+  TimerInput,
 } from './schema.js';
 import { DOCUMENT_TYPES } from './schema.js';
 
@@ -1703,6 +1705,229 @@ export const deleteNoteTool: SanityTool = {
 };
 
 // ============================================================================
+// TIMER TOOLS
+// ============================================================================
+
+/**
+ * Generate a short unique ID for timers
+ */
+function generateTimerId(): string {
+  return Math.random().toString(36).substring(2, 8);
+}
+
+export const createTimerTool: SanityTool = {
+  name: 'lifeos_create_timer',
+  description: `Create a new countdown timer in LifeOS. Timers sync across all devices.
+
+Example: Set a 5 minute timer for "Check laundry"`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      label: {
+        type: 'string',
+        description: 'What to display when timer expires',
+      },
+      minutes: {
+        type: 'number',
+        description: 'Duration in minutes (can combine with seconds)',
+      },
+      seconds: {
+        type: 'number',
+        description: 'Duration in seconds (can combine with minutes)',
+      },
+      deviceId: {
+        type: 'string',
+        description: 'Optional device identifier',
+      },
+    },
+    required: ['label'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+
+      // Calculate duration in milliseconds
+      let durationMs = 0;
+      if (input.minutes) {
+        durationMs += Number(input.minutes) * 60 * 1000;
+      }
+      if (input.seconds) {
+        durationMs += Number(input.seconds) * 1000;
+      }
+
+      if (durationMs <= 0) {
+        return JSON.stringify({
+          success: false,
+          error: 'Timer duration must be positive. Provide minutes and/or seconds.',
+        });
+      }
+
+      const now = Date.now();
+      const id = generateTimerId();
+
+      const data: TimerInput = {
+        id,
+        label: String(input.label),
+        endTime: now + durationMs,
+        durationMs,
+        status: 'active',
+        deviceId: input.deviceId ? String(input.deviceId) : undefined,
+      };
+
+      const doc: { _type: string; [key: string]: unknown } = {
+        _type: DOCUMENT_TYPES.TIMER,
+        id: data.id,
+        label: data.label,
+        endTime: data.endTime,
+        durationMs: data.durationMs,
+        status: data.status,
+      };
+      if (data.deviceId) doc.deviceId = data.deviceId;
+
+      const result = await client.create(doc);
+
+      const minutes = Math.floor(durationMs / 60000);
+      const seconds = Math.floor((durationMs % 60000) / 1000);
+      const durationStr = minutes > 0
+        ? `${minutes}m${seconds > 0 ? ` ${seconds}s` : ''}`
+        : `${seconds}s`;
+
+      return JSON.stringify({
+        success: true,
+        _id: result._id,
+        id: data.id,
+        message: `Timer "${data.label}" set for ${durationStr}`,
+        endTime: data.endTime,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const queryTimersTool: SanityTool = {
+  name: 'lifeos_query_timers',
+  description: `Query timers from LifeOS. Returns active timers by default.
+
+Filter by status:
+- active (default): Currently running timers
+- expired: Timers that have ended
+- cancelled: Cancelled timers
+- all: All timers`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      status: {
+        type: 'string',
+        enum: ['active', 'expired', 'cancelled', 'all'],
+        description: 'Filter by status (default: active)',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max items to return (default: 20)',
+      },
+    },
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const status = input.status || 'active';
+      const limit = Number(input.limit) || 20;
+
+      let query = `*[_type == "${DOCUMENT_TYPES.TIMER}"`;
+      if (status !== 'all') {
+        query += ` && status == "${status}"`;
+      }
+      query += `] | order(endTime asc) [0...${limit}] {
+        _id, id, label, endTime, durationMs, status, deviceId, _createdAt
+      }`;
+
+      const results = await client.fetch<Timer[]>(query);
+
+      // Add computed remainingMs for active timers
+      const now = Date.now();
+      const timersWithRemaining = results.map(timer => ({
+        ...timer,
+        remainingMs: timer.status === 'active' ? Math.max(0, timer.endTime - now) : 0,
+      }));
+
+      return JSON.stringify({
+        success: true,
+        count: results.length,
+        timers: timersWithRemaining,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+export const updateTimerTool: SanityTool = {
+  name: 'lifeos_update_timer',
+  description: `Update a timer in LifeOS. Use to cancel timers or mark as expired.`,
+
+  input_schema: {
+    type: 'object',
+    properties: {
+      id: {
+        type: 'string',
+        description: 'The short id (e.g., "a3b2c1") or _id of the timer to update',
+      },
+      status: {
+        type: 'string',
+        enum: ['active', 'expired', 'cancelled'],
+        description: 'New status',
+      },
+      label: {
+        type: 'string',
+        description: 'Updated label',
+      },
+    },
+    required: ['id'],
+  },
+
+  execute: async (input: Record<string, unknown>): Promise<string> => {
+    try {
+      const client = getSanityClient();
+      const idInput = String(input.id);
+
+      // Find the timer - could be short id or _id
+      const query = `*[_type == "${DOCUMENT_TYPES.TIMER}" && (id == $id || _id == $id)][0]`;
+      const timer = await client.fetch<Timer | null>(query, { id: idInput });
+
+      if (!timer) {
+        return JSON.stringify({
+          success: false,
+          error: `Timer not found: ${idInput}`,
+        });
+      }
+
+      const updates: Record<string, unknown> = {};
+      if (input.status) updates.status = input.status;
+      if (input.label) updates.label = String(input.label);
+
+      const result = await client.patch(timer._id).set(updates).commit();
+
+      return JSON.stringify({
+        success: true,
+        _id: result._id,
+        id: timer.id,
+        message: input.status === 'cancelled' ? 'Timer cancelled' : 'Timer updated',
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return JSON.stringify({ success: false, error: msg });
+    }
+  },
+};
+
+// ============================================================================
 // TOOL REGISTRY
 // ============================================================================
 
@@ -1731,6 +1956,9 @@ export const sanityTools: Record<string, SanityTool> = {
   lifeos_create_note: createNoteTool,
   lifeos_query_notes: queryNotesTool,
   lifeos_delete_note: deleteNoteTool,
+  lifeos_create_timer: createTimerTool,
+  lifeos_query_timers: queryTimersTool,
+  lifeos_update_timer: updateTimerTool,
 };
 
 /**

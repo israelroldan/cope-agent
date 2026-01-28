@@ -8,6 +8,10 @@ import * as http from 'http';
 // Auto-launch support
 import AutoLaunch from 'auto-launch';
 
+// Sanity real-time listener for timers
+import { subscribeToTimers, isSanityConfigured, type SanityTimer, type TimerListenerEvent } from '../../src/sanity/client.js';
+import { loadCredentialsIntoEnv } from '../../src/config/index.js';
+
 // Server state
 let serverProcess: ChildProcess | null = null;
 let studioProcess: ChildProcess | null = null;
@@ -16,17 +20,20 @@ let isServerRunning = false;
 let isStudioRunning = false;
 let debugWindow: BrowserWindow | null = null;
 
-// Timer state (synced from server) - supports multiple timers
+// Timer state (synced from Sanity) - supports multiple timers
 interface TimerInfo {
   id: string;
+  _id?: string;
   label: string;
   endTime: number;
   remainingMs: number;
 }
 let activeTimers: TimerInfo[] = [];
 let previousTimerIds: Set<string> = new Set(); // Track which timers we knew about
-let timerPollInterval: NodeJS.Timeout | null = null;
+let timerUnsubscribe: (() => void) | null = null; // Sanity subscription
+let timerUpdateInterval: NodeJS.Timeout | null = null; // For updating remainingMs display
 let timerAlertWindows: BrowserWindow[] = []; // One window per display
+let usingSanityTimers = false; // Whether we're using Sanity or HTTP fallback
 
 // Studio port - use a private/ephemeral port to avoid conflicts
 // (54321 conflicts with Supabase default)
@@ -173,7 +180,7 @@ async function startServer(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (await checkServerHealth()) {
       isServerRunning = true;
-      startTimerPolling();
+      startTimerSubscription();
       updateTrayMenu();
       return;
     }
@@ -186,7 +193,7 @@ async function startServer(): Promise<void> {
 // Stop the server
 function stopServer(): void {
   if (serverProcess) {
-    stopTimerPolling();
+    stopTimerSubscription();
     serverProcess.kill('SIGTERM');
     serverProcess = null;
     isServerRunning = false;
@@ -265,9 +272,74 @@ function updateTrayTitle(): void {
 }
 
 /**
- * Poll timer state from server
+ * Handle timer updates from Sanity
  */
-async function pollTimerState(): Promise<void> {
+function handleTimerUpdate(event: TimerListenerEvent): void {
+  const now = Date.now();
+  const newTimers = event.timers || [];
+
+  // Convert Sanity timers to TimerInfo format
+  const timerInfos: TimerInfo[] = newTimers.map(t => ({
+    id: t.id,
+    _id: t._id,
+    label: t.label,
+    endTime: t.endTime,
+    remainingMs: Math.max(0, t.endTime - now),
+  }));
+
+  // Check for expired timers
+  for (const prevId of previousTimerIds) {
+    const currentTimer = timerInfos.find(t => t.id === prevId);
+    // Timer expired if it was active before and now has remainingMs <= 0
+    if (currentTimer && currentTimer.remainingMs <= 0) {
+      showTimerAlert(currentTimer.label || 'Timer complete');
+      // Mark timer as expired in Sanity
+      cancelTimerViaApi(prevId);
+    }
+  }
+
+  // Update state - only keep timers with remaining time
+  activeTimers = timerInfos.filter(t => t.remainingMs > 0);
+  previousTimerIds = new Set(activeTimers.map(t => t.id));
+
+  updateTrayTitle();
+  updateTrayMenu();
+}
+
+/**
+ * Update timer remainingMs for display (called every second)
+ */
+function updateTimerDisplay(): void {
+  const now = Date.now();
+  let hasChanges = false;
+
+  for (const timer of activeTimers) {
+    const newRemaining = Math.max(0, timer.endTime - now);
+
+    // Check if timer just expired
+    if (timer.remainingMs > 0 && newRemaining <= 0) {
+      showTimerAlert(timer.label || 'Timer complete');
+      cancelTimerViaApi(timer.id);
+      hasChanges = true;
+    }
+
+    timer.remainingMs = newRemaining;
+  }
+
+  // Remove expired timers from local state
+  if (hasChanges) {
+    activeTimers = activeTimers.filter(t => t.remainingMs > 0);
+    previousTimerIds = new Set(activeTimers.map(t => t.id));
+    updateTrayMenu();
+  }
+
+  updateTrayTitle();
+}
+
+/**
+ * Poll timer state from HTTP server (fallback when Sanity not configured)
+ */
+async function pollTimerStateHttp(): Promise<void> {
   if (!isServerRunning) return;
 
   return new Promise((resolve) => {
@@ -291,20 +363,17 @@ async function pollTimerState(): Promise<void> {
           };
 
           const newTimers = response.timers || [];
-          const newTimerIds = new Set(newTimers.map(t => t.id));
 
-          // Check for expired timers (were in previous list, now either gone or remainingMs <= 0)
+          // Check for expired timers
           for (const prevId of previousTimerIds) {
             const currentTimer = newTimers.find(t => t.id === prevId);
-            // Timer expired if it was active before and now has remainingMs <= 0
             if (currentTimer && currentTimer.remainingMs <= 0) {
               showTimerAlert(currentTimer.label || 'Timer complete');
-              // Cancel this specific timer on the server
               cancelTimerViaApi(prevId);
             }
           }
 
-          // Update state - only keep timers with remaining time
+          // Update state
           activeTimers = newTimers.filter(t => t.remainingMs > 0);
           previousTimerIds = new Set(activeTimers.map(t => t.id));
 
@@ -328,30 +397,71 @@ async function pollTimerState(): Promise<void> {
 }
 
 /**
- * Start polling timer state
+ * Start timer subscription (Sanity real-time or HTTP fallback)
  */
-function startTimerPolling(): void {
-  if (timerPollInterval) return;
+function startTimerSubscription(): void {
+  if (timerUnsubscribe || timerUpdateInterval) return;
 
-  // Poll every second
-  timerPollInterval = setInterval(() => {
-    pollTimerState();
-  }, 1000);
+  // Load credentials so Sanity client can authenticate
+  loadCredentialsIntoEnv();
 
-  // Initial poll
-  pollTimerState();
+  // Try to use Sanity real-time listener
+  if (isSanityConfigured()) {
+    safeLog('Starting Sanity timer subscription...');
+    usingSanityTimers = true;
+
+    timerUnsubscribe = subscribeToTimers(
+      (event) => {
+        handleTimerUpdate(event);
+      },
+      (error) => {
+        safeError('Sanity timer subscription error:', error);
+        // Fall back to HTTP polling on error
+        stopTimerSubscription();
+        usingSanityTimers = false;
+        startHttpTimerPolling();
+      }
+    );
+
+    // Still need an interval to update the countdown display
+    timerUpdateInterval = setInterval(() => {
+      updateTimerDisplay();
+    }, 1000);
+  } else {
+    safeLog('Sanity not configured, using HTTP polling for timers');
+    startHttpTimerPolling();
+  }
 }
 
 /**
- * Stop polling timer state
+ * Start HTTP polling for timers (fallback)
  */
-function stopTimerPolling(): void {
-  if (timerPollInterval) {
-    clearInterval(timerPollInterval);
-    timerPollInterval = null;
+function startHttpTimerPolling(): void {
+  if (timerUpdateInterval) return;
+
+  timerUpdateInterval = setInterval(() => {
+    pollTimerStateHttp();
+  }, 1000);
+
+  // Initial poll
+  pollTimerStateHttp();
+}
+
+/**
+ * Stop timer subscription
+ */
+function stopTimerSubscription(): void {
+  if (timerUnsubscribe) {
+    timerUnsubscribe();
+    timerUnsubscribe = null;
+  }
+  if (timerUpdateInterval) {
+    clearInterval(timerUpdateInterval);
+    timerUpdateInterval = null;
   }
   activeTimers = [];
   previousTimerIds.clear();
+  usingSanityTimers = false;
   updateTrayTitle();
 }
 

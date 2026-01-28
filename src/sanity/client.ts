@@ -54,3 +54,117 @@ export function getSanityClient(): SanityClient {
 export function isSanityConfigured(): boolean {
   return !!(process.env.SANITY_PROJECT_ID && process.env.SANITY_API_TOKEN);
 }
+
+/**
+ * Timer document from Sanity
+ */
+export interface SanityTimer {
+  _id: string;
+  _type: 'timer';
+  id: string;
+  label: string;
+  endTime: number;
+  durationMs: number;
+  status: 'active' | 'expired' | 'cancelled';
+  deviceId?: string;
+  _createdAt: string;
+  _updatedAt: string;
+}
+
+/**
+ * Listener event for timer changes
+ */
+export interface TimerListenerEvent {
+  type: 'sync' | 'create' | 'update' | 'delete';
+  timers: SanityTimer[];
+  changedTimer?: SanityTimer;
+  deletedId?: string;
+}
+
+/**
+ * Subscribe to timer changes in real-time
+ *
+ * Returns an unsubscribe function to stop listening.
+ *
+ * @param callback Function called when timers change
+ * @param onError Optional error handler
+ */
+export function subscribeToTimers(
+  callback: (event: TimerListenerEvent) => void,
+  onError?: (error: Error) => void
+): () => void {
+  if (!isSanityConfigured()) {
+    onError?.(new Error('Sanity not configured'));
+    return () => {};
+  }
+
+  const client = getSanityClient();
+
+  // First, fetch all active timers for initial sync
+  const initialQuery = `*[_type == "timer" && status == "active"] | order(endTime asc)`;
+
+  client.fetch<SanityTimer[]>(initialQuery)
+    .then(timers => {
+      callback({ type: 'sync', timers });
+    })
+    .catch(error => {
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+    });
+
+  // Subscribe to real-time changes
+  // Listen for all timer document changes
+  const query = `*[_type == "timer"]`;
+
+  const subscription = client.listen<SanityTimer>(query, {}, {
+    includeResult: true,
+    includePreviousRevision: false,
+    visibility: 'query',
+  }).subscribe({
+    next: (update) => {
+      // Re-fetch all active timers on any change
+      // This is simpler than trying to merge individual changes
+      client.fetch<SanityTimer[]>(initialQuery)
+        .then(timers => {
+          // Type narrow - 'mutation' events have transition, result, documentId
+          if ('transition' in update && 'result' in update) {
+            const mutationEvent = update as { transition: string; result?: SanityTimer; documentId?: string };
+            if (mutationEvent.transition === 'update' && mutationEvent.result) {
+              callback({
+                type: 'update',
+                timers,
+                changedTimer: mutationEvent.result,
+              });
+            } else if (mutationEvent.transition === 'appear' && mutationEvent.result) {
+              callback({
+                type: 'create',
+                timers,
+                changedTimer: mutationEvent.result,
+              });
+            } else if (mutationEvent.transition === 'disappear') {
+              callback({
+                type: 'delete',
+                timers,
+                deletedId: mutationEvent.documentId,
+              });
+            } else {
+              callback({ type: 'sync', timers });
+            }
+          } else {
+            // Welcome/reconnect event - just sync
+            callback({ type: 'sync', timers });
+          }
+        })
+        .catch(error => {
+          onError?.(error instanceof Error ? error : new Error(String(error)));
+        });
+    },
+    error: (error) => {
+      onError?.(error instanceof Error ? error : new Error(String(error)));
+    },
+  });
+
+  // Return unsubscribe function
+  return () => {
+    subscription.unsubscribe();
+  };
+}

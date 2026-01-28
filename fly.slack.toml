@@ -1,0 +1,32 @@
+# Fly.io configuration for COPE Agent Slack Bot
+#
+# This is a separate app from the HTTP server since it's a different process.
+# Uses Socket Mode so no HTTP port is needed.
+#
+# Setup:
+#   fly launch --config fly.slack.toml --no-deploy  # Create app
+#   fly secrets set -a cope-slack-bot SLACK_BOT_TOKEN=... SLACK_APP_TOKEN=... ...
+#   fly deploy --config fly.slack.toml
+#
+# Note: Deploy this AFTER the main cope-agent app is running
+
+app = "cope-slack-bot"
+primary_region = "ams"  # Same region as main app
+
+[build]
+  dockerfile = "Dockerfile.slack"
+
+[env]
+  NODE_ENV = "production"
+
+# No HTTP service - Slack bot uses Socket Mode (outbound WebSocket)
+# Fly will keep the process running
+
+[processes]
+  app = "node dist/slack-bot.js"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"  # Slack bot needs less memory
+  cpu_kind = "shared"
+  cpus = 1

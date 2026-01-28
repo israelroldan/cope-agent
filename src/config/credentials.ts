@@ -17,19 +17,37 @@ const CREDENTIALS_FILE = path.join(CONFIG_DIR, '.env');
  * Known credentials and their descriptions
  */
 export const KNOWN_CREDENTIALS: Record<string, string> = {
+  // API Keys
   ANTHROPIC_API_KEY: 'Anthropic API key for spawning subagents',
   ANTHROPIC_AUTH_TOKEN: 'Alternative auth token (z.ai proxies)',
   ANTHROPIC_BASE_URL: 'Custom API endpoint (optional)',
+  COPE_API_KEY: 'API key for remote HTTP access (required for non-local requests)',
+
+  // Slack
   SLACK_MCP_XOXB_TOKEN: 'Slack bot token for slack-tatoma MCP',
+  SLACK_BOT_TOKEN: 'Slack bot OAuth token for Slack bot (xoxb-...)',
+  SLACK_APP_TOKEN: 'Slack app-level token for Socket Mode (xapp-...)',
+
+  // School
   MAGISTER_USER: 'Magister username for school MCP',
   MAGISTER_PASS: 'Magister password for school MCP',
   MAGISTER_SCHOOL: 'Magister school ID (default: sintlucas-vmbo)',
+
+  // External services
   OMI_API_KEY: 'Omi API key for lifelog MCP',
-  GOOGLE_OAUTH_CREDENTIALS: 'Path to Google OAuth credentials JSON',
   YNAB_API_TOKEN: 'YNAB API token for finance MCP (from Developer Settings)',
+
+  // Sanity CMS
   SANITY_PROJECT_ID: 'Sanity project ID for LifeOS',
   SANITY_DATASET: 'Sanity dataset name (default: production)',
   SANITY_API_TOKEN: 'Sanity API token with read/write permissions',
+
+  // Path overrides (for remote deployment)
+  MCP_ICAL_DIR: 'Directory containing mcp-ical (default: /Users/israel/code/mcp-ical)',
+  MAGISTER_MCP_PATH: 'Path to magister-mcp dist/index.js',
+  YNAB_MCP_PATH: 'Path to mcp-ynab executable',
+  PLAYWRIGHT_PROFILE: 'Browser profile directory for Playwright',
+  GOOGLE_OAUTH_CREDENTIALS: 'Path to Google OAuth credentials JSON',
 };
 
 /**

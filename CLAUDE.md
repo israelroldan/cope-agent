@@ -5,21 +5,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build and Development Commands
 
 ```bash
-# Build TypeScript to dist/
+# Build TypeScript to dist/ (also copies prompt.md files from agents)
 npm run build
 
-# Run in development mode (no build required)
+# Run in development mode (uses bun, no build required)
 npm run dev
 
 # Type check without emitting
 npm run typecheck
 
-# Run the CLI
+# Run the CLI (production)
 npm start
 
 # Run as MCP server (for Claude Code integration)
 npm run mcp           # production (from dist/)
 npm run mcp:dev       # development (via tsx)
+
+# Run as HTTP server (for external integrations)
+npm run serve         # production
+npm run serve:dev     # development
+
+# Menubar app (Electron, macOS)
+npm run menubar:install   # install dependencies
+npm run menubar           # run in development
+npm run menubar:dist      # build distributable
+
+# Sanity Studio (LifeOS backend)
+npm run studio            # run local studio
+npm run studio:build      # build for deployment
 ```
 
 ## Architecture Overview
@@ -60,13 +73,14 @@ Defined in `src/agents/`, each has:
 - `mcpServers` - list of required MCP servers
 - `model` - preferred Claude model (haiku/sonnet/opus)
 
-Specialists: `email-agent`, `calendar-agent`, `slack-agent`, `lifeos-agent`, `notion-work-agent`, `lifelog-agent`, `school-agent`, `miro-agent`, `finance-agent`, `cope-workflow-agent`
+Specialists: `email-agent`, `calendar-agent`, `slack-agent`, `lifeos-agent`, `notion-work-agent`, `lifelog-agent`, `school-agent`, `miro-agent`, `finance-agent`, `ics-sync-agent`, `cope-workflow-agent`
 
 ### Workflows
 
 Defined in `src/workflows/`, workflows orchestrate multi-domain operations:
 - **Daily**: `daily-briefing`, `daily-close`
 - **Weekly**: `week-start`, `week-mid`, `week-end`
+- **Finance**: `budget-review`, `month-close`
 - **COPE phases**: `clarify`, `organise`, `prioritise`, `execute`
 
 The `cope-workflow-agent` handles workflow execution by spawning multiple specialists in parallel.
@@ -88,7 +102,9 @@ MCP servers are registered in `src/mcp/registry.ts`. Types supported:
 
 Tool names are namespaced as `serverName__toolName` when passed to specialists.
 
-## MCP Server Mode
+## Running Modes
+
+### MCP Server Mode
 
 The agent can run as an MCP server itself (for Claude Code integration):
 
@@ -97,3 +113,41 @@ npm run mcp
 ```
 
 This exposes `discover_capability`, `spawn_specialist`, and `spawn_parallel` as MCP tools.
+
+### HTTP Server Mode
+
+For external integrations via REST API:
+
+```bash
+npm run serve
+```
+
+### Menubar App
+
+A macOS Electron menubar app that provides quick access to the agent. Located in `menubar-app/`. The app bundles the HTTP server and provides:
+- Quick text input via menubar icon
+- Launch options for Terminal/iTerm
+- Countdown timer feature
+
+## Adding New Components
+
+### Adding a Specialist Agent
+
+1. Create folder `src/agents/{name}-agent/` with:
+   - `index.ts` - exports `AgentDefinition`
+   - `config.ts` - model, MCP servers, max turns, utility tools
+   - `prompt.md` - system prompt with domain knowledge
+
+2. Register in `src/agents/definitions.ts`
+
+3. Add domain to `config/capabilities.yaml` with triggers and MCP servers
+
+4. If new MCP server needed, add config to `src/mcp/registry.ts`
+
+### Adding a Workflow
+
+1. Create workflow in `src/workflows/` implementing `WorkflowDefinition`
+
+2. Register in `src/workflows/index.ts`
+
+3. Add to `config/capabilities.yaml` under `workflows:` with triggers

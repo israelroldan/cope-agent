@@ -1,0 +1,33 @@
+# Dependencies (will be installed fresh in container)
+node_modules/
+
+# Source files (we copy built dist/)
+src/
+
+# Development files
+*.md
+*.log
+.env
+.env.*
+.git/
+.github/
+.gitignore
+
+# Menubar app (not needed on server)
+menubar-app/
+
+# Local certificates
+certs/
+
+# IDE
+.vscode/
+.idea/
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__/
+
+# Sanity Studio (separate deployment)
+sanity.config.ts
+sanity.cli.ts

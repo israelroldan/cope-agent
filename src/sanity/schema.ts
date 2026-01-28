@@ -192,6 +192,31 @@ export interface NoteInput {
 }
 
 /**
+ * Timer - countdown timers that sync across devices
+ */
+export interface Timer extends SanityDocument {
+  _type: 'timer';
+  id: string;              // Short unique ID (e.g., "a3b2c1")
+  label: string;           // Display label
+  endTime: number;         // Unix timestamp (ms)
+  durationMs: number;      // Original duration
+  status: 'active' | 'expired' | 'cancelled';
+  deviceId?: string;       // Which device created it
+}
+
+/**
+ * Input for creating a timer
+ */
+export interface TimerInput {
+  id?: string;             // Optional, auto-generated if not provided
+  label: string;
+  endTime?: number;        // Optional, calculated from durationMs if not provided
+  durationMs: number;
+  status?: 'active' | 'expired' | 'cancelled';
+  deviceId?: string;
+}
+
+/**
  * Project - container for related tasks and work
  */
 export interface Project extends SanityDocument {
@@ -229,6 +254,7 @@ export const DOCUMENT_TYPES = {
   TASK: 'task',
   DECISION: 'decision',
   NOTE: 'note',
+  TIMER: 'timer',
 } as const;
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[keyof typeof DOCUMENT_TYPES];
@@ -444,6 +470,25 @@ export const SCHEMA_DEFINITIONS: DocumentTypeDef[] = [
         options: ['project', 'openLoop', 'task', 'goal', 'decision'],
       },
       { name: 'tags', type: 'array', of: 'string', description: 'Tags for categorization' },
+    ],
+  },
+  {
+    name: 'timer',
+    title: 'Timer',
+    description: 'Countdown timers that sync across devices',
+    fields: [
+      { name: 'id', type: 'string', required: true, description: 'Short unique ID (e.g., "a3b2c1")' },
+      { name: 'label', type: 'string', required: true, description: 'Display label' },
+      { name: 'endTime', type: 'number', required: true, description: 'Unix timestamp (ms) when timer ends' },
+      { name: 'durationMs', type: 'number', required: true, description: 'Original duration in milliseconds' },
+      {
+        name: 'status',
+        type: 'string',
+        required: true,
+        description: 'Timer status',
+        options: ['active', 'expired', 'cancelled'],
+      },
+      { name: 'deviceId', type: 'string', description: 'Which device created the timer' },
     ],
   },
 ];

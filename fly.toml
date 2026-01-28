@@ -1,0 +1,44 @@
+# Fly.io configuration for COPE Agent HTTP Server
+#
+# Setup:
+#   fly launch --no-deploy          # Create app (first time)
+#   fly secrets set ANTHROPIC_API_KEY=... COPE_API_KEY=... ...
+#   fly deploy                       # Deploy
+#
+# Or just push to main for auto-deploy (after GitHub Actions setup)
+
+app = "cope-agent"
+primary_region = "ams"  # Amsterdam - change to your preferred region
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3847"
+
+[http_service]
+  internal_port = 3847
+  force_https = true
+  auto_stop_machines = false   # Keep running for timer sync
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

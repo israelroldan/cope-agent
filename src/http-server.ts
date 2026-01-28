@@ -22,7 +22,7 @@
 
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'http';
 import { createServer as createHttpsServer } from 'https';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
@@ -40,6 +40,9 @@ import { setTimerTool, cancelTimerTool, executeUtilityTool } from './tools/utili
 import { loadCredentialsIntoEnv } from './config/index.js';
 import { getHttpDebugClient } from './debug/index.js';
 import type { DebugEvent, DebugEventType } from './debug/index.js';
+import { getSanityClient, isSanityConfigured, type SanityTimer } from './sanity/client.js';
+import { DOCUMENT_TYPES } from './sanity/schema.js';
+import { getMcpAvailabilityStatus, listMcpServers } from './mcp/registry.js';
 
 // ============================================================================
 // Debug SSE Infrastructure
@@ -82,6 +85,110 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Go up one level from either dist/ or src/ to get project root
 const PROJECT_ROOT = join(__dirname, '..');
+
+// ============================================================================
+// Authentication & Rate Limiting
+// ============================================================================
+
+/**
+ * Check if request is from localhost (bypass auth)
+ */
+function isLocalRequest(req: IncomingMessage): boolean {
+  const remoteAddress = req.socket.remoteAddress;
+  // IPv4 localhost
+  if (remoteAddress === '127.0.0.1') return true;
+  // IPv6 localhost
+  if (remoteAddress === '::1') return true;
+  // IPv6 mapped IPv4 localhost
+  if (remoteAddress === '::ffff:127.0.0.1') return true;
+  return false;
+}
+
+/**
+ * Authenticate a request
+ * Local requests bypass auth, remote requests need API key
+ */
+function authenticateRequest(req: IncomingMessage, url: URL): { authenticated: boolean; error?: string } {
+  // Local requests always pass
+  if (isLocalRequest(req)) {
+    return { authenticated: true };
+  }
+
+  // Get API key from environment
+  const expectedKey = process.env.COPE_API_KEY;
+
+  // If no API key configured, reject all remote requests
+  if (!expectedKey) {
+    return {
+      authenticated: false,
+      error: 'Remote access not configured. Set COPE_API_KEY in credentials.',
+    };
+  }
+
+  // Check X-Api-Key header
+  const headerKey = req.headers['x-api-key'];
+  if (headerKey === expectedKey) {
+    return { authenticated: true };
+  }
+
+  // Check api_key query parameter
+  const queryKey = url.searchParams.get('api_key');
+  if (queryKey === expectedKey) {
+    return { authenticated: true };
+  }
+
+  return {
+    authenticated: false,
+    error: 'Unauthorized. Provide valid API key via X-Api-Key header or api_key query param.',
+  };
+}
+
+// Rate limiting state
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+const rateLimits = new Map<string, RateLimitEntry>();
+
+// Rate limit configuration
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 100;    // 100 requests per window
+
+/**
+ * Check rate limit for an IP
+ */
+function checkRateLimit(ip: string): { allowed: boolean; remaining: number; resetIn: number } {
+  const now = Date.now();
+
+  // Clean up expired entries occasionally
+  if (Math.random() < 0.01) {
+    for (const [key, entry] of rateLimits) {
+      if (entry.resetAt < now) {
+        rateLimits.delete(key);
+      }
+    }
+  }
+
+  let entry = rateLimits.get(ip);
+
+  // Reset if window expired
+  if (!entry || entry.resetAt < now) {
+    entry = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    rateLimits.set(ip, entry);
+  }
+
+  // Increment count
+  entry.count++;
+
+  const remaining = Math.max(0, RATE_LIMIT_MAX_REQUESTS - entry.count);
+  const resetIn = Math.max(0, entry.resetAt - now);
+
+  return {
+    allowed: entry.count <= RATE_LIMIT_MAX_REQUESTS,
+    remaining,
+    resetIn,
+  };
+}
 
 // Configuration
 const SERVER_NAME = 'cope-agent';
@@ -246,27 +353,8 @@ const transports = new Map<string, StreamableHTTPServerTransport>();
 const servers = new Map<string, Server>();
 
 // ============================================================================
-// Timer State
+// Timer State (Sanity-backed)
 // ============================================================================
-
-interface TimerState {
-  id: string;           // Unique timer ID
-  endTime: number;      // Unix timestamp when timer ends
-  label: string;        // What to display when timer expires
-  durationMs: number;   // Original duration
-  createdAt: number;    // When timer was created
-}
-
-// Store multiple timers by ID
-const activeTimers = new Map<string, TimerState>();
-
-// Timer persistence file path
-const TIMERS_FILE = join(
-  process.env.HOME || process.env.USERPROFILE || '.',
-  '.config',
-  'cope-agent',
-  'timers.json'
-);
 
 // Generate a short unique ID
 function generateTimerId(): string {
@@ -274,47 +362,112 @@ function generateTimerId(): string {
 }
 
 /**
- * Save timers to persistent storage
+ * Query active timers from Sanity
  */
-function saveTimers(): void {
+async function queryActiveTimers(): Promise<SanityTimer[]> {
+  if (!isSanityConfigured()) {
+    return [];
+  }
+
   try {
-    const timers = Array.from(activeTimers.values());
-    const dir = dirname(TIMERS_FILE);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-    writeFileSync(TIMERS_FILE, JSON.stringify(timers, null, 2));
+    const client = getSanityClient();
+    const query = `*[_type == "${DOCUMENT_TYPES.TIMER}" && status == "active"] | order(endTime asc) {
+      _id, id, label, endTime, durationMs, status, deviceId, _createdAt
+    }`;
+    return await client.fetch<SanityTimer[]>(query);
   } catch (error) {
-    console.error('Failed to save timers:', error);
+    console.error('Failed to query timers from Sanity:', error);
+    return [];
   }
 }
 
 /**
- * Load timers from persistent storage
+ * Create a timer in Sanity
  */
-function loadTimers(): void {
+async function createSanityTimer(timer: {
+  id: string;
+  label: string;
+  endTime: number;
+  durationMs: number;
+  deviceId?: string;
+}): Promise<SanityTimer | null> {
+  if (!isSanityConfigured()) {
+    console.error('Cannot create timer: Sanity not configured');
+    return null;
+  }
+
   try {
-    if (!existsSync(TIMERS_FILE)) return;
-
-    const data = readFileSync(TIMERS_FILE, 'utf-8');
-    const timers = JSON.parse(data) as TimerState[];
-    const now = Date.now();
-
-    // Only load timers that haven't expired
-    for (const timer of timers) {
-      if (timer.endTime > now) {
-        activeTimers.set(timer.id, timer);
-      }
-    }
-
-    // Clean up expired timers from file
-    if (activeTimers.size !== timers.length) {
-      saveTimers();
-    }
-
-    console.log(`Loaded ${activeTimers.size} active timer(s)`);
+    const client = getSanityClient();
+    const doc = {
+      _type: DOCUMENT_TYPES.TIMER,
+      id: timer.id,
+      label: timer.label,
+      endTime: timer.endTime,
+      durationMs: timer.durationMs,
+      status: 'active' as const,
+      deviceId: timer.deviceId,
+    };
+    return await client.create(doc) as SanityTimer;
   } catch (error) {
-    console.error('Failed to load timers:', error);
+    console.error('Failed to create timer in Sanity:', error);
+    return null;
+  }
+}
+
+/**
+ * Cancel a timer in Sanity (by short id or _id)
+ */
+async function cancelSanityTimer(timerId: string): Promise<{ success: boolean; timer?: SanityTimer; error?: string }> {
+  if (!isSanityConfigured()) {
+    return { success: false, error: 'Sanity not configured' };
+  }
+
+  try {
+    const client = getSanityClient();
+
+    // Find the timer by short id or _id
+    const query = `*[_type == "${DOCUMENT_TYPES.TIMER}" && (id == $id || _id == $id) && status == "active"][0]`;
+    const timer = await client.fetch<SanityTimer | null>(query, { id: timerId });
+
+    if (!timer) {
+      return { success: false, error: `Timer not found: ${timerId}` };
+    }
+
+    // Update status to cancelled
+    await client.patch(timer._id).set({ status: 'cancelled' }).commit();
+
+    return { success: true, timer };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('Failed to cancel timer in Sanity:', error);
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Cancel all active timers in Sanity
+ */
+async function cancelAllSanityTimers(): Promise<{ success: boolean; count: number }> {
+  if (!isSanityConfigured()) {
+    return { success: false, count: 0 };
+  }
+
+  try {
+    const client = getSanityClient();
+
+    // Get all active timers
+    const query = `*[_type == "${DOCUMENT_TYPES.TIMER}" && status == "active"]._id`;
+    const ids = await client.fetch<string[]>(query);
+
+    // Cancel all
+    for (const id of ids) {
+      await client.patch(id).set({ status: 'cancelled' }).commit();
+    }
+
+    return { success: true, count: ids.length };
+  } catch (error) {
+    console.error('Failed to cancel all timers in Sanity:', error);
+    return { success: false, count: 0 };
   }
 }
 
@@ -359,6 +512,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
     return;
   }
 
+  // Get client IP for rate limiting
+  const clientIp = req.socket.remoteAddress || 'unknown';
+
+  // Rate limiting (applies to all requests)
+  const rateLimit = checkRateLimit(clientIp);
+  res.setHeader('X-RateLimit-Limit', RATE_LIMIT_MAX_REQUESTS.toString());
+  res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
+  res.setHeader('X-RateLimit-Reset', Math.ceil(rateLimit.resetIn / 1000).toString());
+
+  if (!rateLimit.allowed) {
+    res.writeHead(429, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      error: 'Too many requests',
+      retryAfter: Math.ceil(rateLimit.resetIn / 1000),
+    }));
+    return;
+  }
+
+  // Authentication (skip for health check)
+  if (url.pathname !== '/health' && url.pathname !== '/') {
+    const auth = authenticateRequest(req, url);
+    if (!auth.authenticated) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: auth.error }));
+      return;
+    }
+  }
+
   // Health check endpoint
   if (url.pathname === '/health' || url.pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -373,7 +554,34 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
     return;
   }
 
-  // Timer endpoints - support multiple timers
+  // Status endpoint - shows MCP availability (requires auth)
+  if (url.pathname === '/status') {
+    const mcpServers = listMcpServers();
+    const mcpStatus = getMcpAvailabilityStatus();
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      server: SERVER_NAME,
+      version: SERVER_VERSION,
+      sanity: {
+        configured: isSanityConfigured(),
+      },
+      mcpServers: mcpServers.map(s => ({
+        name: s.name,
+        description: s.description,
+        available: s.available,
+        reason: mcpStatus[s.name]?.reason,
+      })),
+      summary: {
+        total: mcpServers.length,
+        available: mcpServers.filter(s => s.available).length,
+        unavailable: mcpServers.filter(s => !s.available).length,
+      },
+    }, null, 2));
+    return;
+  }
+
+  // Timer endpoints - support multiple timers (Sanity-backed)
   // GET /timer - list all timers
   // POST /timer - create new timer
   // DELETE /timer - cancel all timers
@@ -381,24 +589,36 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
   if (url.pathname === '/timer' || url.pathname.startsWith('/timer/')) {
     const timerId = url.pathname.startsWith('/timer/') ? url.pathname.slice(7) : null;
 
+    // Check if Sanity is configured
+    if (!isSanityConfigured()) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Timer service unavailable: Sanity not configured',
+        hint: 'Set SANITY_PROJECT_ID and SANITY_API_TOKEN in credentials',
+      }));
+      return;
+    }
+
     // GET: Get all active timers
     if (req.method === 'GET') {
+      const timers = await queryActiveTimers();
       const now = Date.now();
-      const timers = Array.from(activeTimers.values())
-        .map(t => ({
-          id: t.id,
-          label: t.label,
-          endTime: t.endTime,
-          durationMs: t.durationMs,
-          remainingMs: Math.max(0, t.endTime - now),
-          createdAt: t.createdAt,
-        }))
-        .sort((a, b) => a.endTime - b.endTime); // Sort by soonest first
+
+      const timerResponse = timers.map(t => ({
+        id: t.id,
+        _id: t._id,
+        label: t.label,
+        endTime: t.endTime,
+        durationMs: t.durationMs,
+        remainingMs: Math.max(0, t.endTime - now),
+        createdAt: t._createdAt,
+        deviceId: t.deviceId,
+      }));
 
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        count: timers.length,
-        timers,
+        count: timerResponse.length,
+        timers: timerResponse,
       }));
       return;
     }
@@ -410,6 +630,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
           minutes?: number;
           seconds?: number;
           label: string;
+          deviceId?: string;
         };
 
         if (!body || !body.label) {
@@ -435,16 +656,21 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
 
         const now = Date.now();
         const id = generateTimerId();
-        const timer: TimerState = {
-          id,
-          endTime: now + durationMs,
-          label: body.label,
-          durationMs,
-          createdAt: now,
-        };
 
-        activeTimers.set(id, timer);
-        saveTimers();
+        const timer = await createSanityTimer({
+          id,
+          label: body.label,
+          endTime: now + durationMs,
+          durationMs,
+          deviceId: body.deviceId,
+        });
+
+        if (!timer) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to create timer in Sanity' }));
+          return;
+        }
+
         debugLog('request', { method: 'timer/set', data: { id, label: body.label, durationMs } });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -452,6 +678,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
           success: true,
           timer: {
             id: timer.id,
+            _id: timer._id,
             endTime: timer.endTime,
             label: timer.label,
             durationMs: timer.durationMs,
@@ -468,25 +695,29 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse, protocol
     if (req.method === 'DELETE') {
       if (timerId) {
         // Cancel specific timer
-        const timer = activeTimers.get(timerId);
-        if (timer) {
-          debugLog('request', { method: 'timer/cancel', data: { id: timerId, label: timer.label } });
-          activeTimers.delete(timerId);
-          saveTimers();
+        const result = await cancelSanityTimer(timerId);
+        if (result.success && result.timer) {
+          debugLog('request', { method: 'timer/cancel', data: { id: timerId, label: result.timer.label } });
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, message: `Timer '${timer.label}' cancelled`, id: timerId }));
+          res.end(JSON.stringify({
+            success: true,
+            message: `Timer '${result.timer.label}' cancelled`,
+            id: timerId,
+          }));
         } else {
           res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, error: `Timer not found: ${timerId}` }));
+          res.end(JSON.stringify({ success: false, error: result.error || `Timer not found: ${timerId}` }));
         }
       } else {
         // Cancel all timers
-        const count = activeTimers.size;
-        debugLog('request', { method: 'timer/cancel-all', data: { count } });
-        activeTimers.clear();
-        saveTimers();
+        const result = await cancelAllSanityTimers();
+        debugLog('request', { method: 'timer/cancel-all', data: { count: result.count } });
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: `Cancelled ${count} timer(s)`, count }));
+        res.end(JSON.stringify({
+          success: true,
+          message: `Cancelled ${result.count} timer(s)`,
+          count: result.count,
+        }));
       }
       return;
     }
@@ -681,9 +912,6 @@ const server = useHttps
         }
       });
     });
-
-// Load persisted timers before starting
-loadTimers();
 
 // Start server
 server.listen(PORT, () => {

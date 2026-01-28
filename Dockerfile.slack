@@ -1,0 +1,20 @@
+# COPE Agent Slack Bot Docker Image
+# Runs the Slack Socket Mode bot for mobile access
+
+FROM node:20-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies (production only)
+RUN npm ci --omit=dev
+
+# Copy built files and config
+COPY dist/ ./dist/
+COPY config/ ./config/
+
+# Run the Slack bot
+CMD ["node", "dist/slack-bot.js"]

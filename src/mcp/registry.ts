@@ -10,6 +10,56 @@
 
 import * as path from 'path';
 
+// ============================================================================
+// Configurable Paths (for local dev vs remote deployment)
+// ============================================================================
+
+/**
+ * Check if running in local development (on Israel's machine)
+ */
+function isLocalDev(): boolean {
+  return process.env.HOME === '/Users/israel';
+}
+
+/**
+ * Get a path from environment variable, with optional local dev fallback
+ * Returns undefined if not configured (disables the MCP)
+ */
+function getPath(envVar: string, localDefault?: string): string | undefined {
+  const envValue = process.env[envVar];
+  if (envValue) return envValue;
+
+  // Only use local defaults on Israel's machine
+  if (localDefault && isLocalDev()) return localDefault;
+
+  return undefined;
+}
+
+/**
+ * Path configuration - returns undefined when not configured
+ * This allows MCPs to be disabled on remote deployments
+ */
+const PATHS = {
+  // MCP server locations
+  get MCP_ICAL_DIR(): string | undefined {
+    return getPath('MCP_ICAL_DIR', '/Users/israel/code/mcp-ical');
+  },
+  get MAGISTER_MCP_PATH(): string | undefined {
+    return getPath('MAGISTER_MCP_PATH', '/Users/israel/code/israelroldan/magister-mcp/dist/index.js');
+  },
+  get YNAB_MCP_PATH(): string | undefined {
+    return getPath('YNAB_MCP_PATH', '/Users/israel/code/mcp-ynab/.venv/bin/mcp-ynab');
+  },
+
+  // Browser and OAuth paths
+  get PLAYWRIGHT_PROFILE(): string | undefined {
+    return getPath('PLAYWRIGHT_PROFILE', path.join('/Users/israel', '.config', 'cope-agent', 'ics-browser-profile'));
+  },
+  get GOOGLE_OAUTH_CREDS(): string | undefined {
+    return getPath('GOOGLE_OAUTH_CREDENTIALS', path.join('/Users/israel', '.config', 'cope', 'credentials', 'google-oauth-work.json'));
+  },
+};
+
 export interface McpServerConfig {
   name: string;
   description: string;
@@ -36,11 +86,14 @@ export interface McpServerConfig {
  * For Docker containers, use argsBuilder to inject env vars with actual values
  * since `-e VAR` only works when VAR is in the shell's environment.
  */
-const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
+const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'command'> & {
+  command?: string;
+  commandBuilder?: () => string | undefined;
   args?: string[];
   argsBuilder?: () => string[];
   envBuilder?: () => Record<string, string>;
   authPathsBuilder?: () => string[];
+  requiresPath?: () => string | undefined;  // Returns undefined if not available
 }> = {
   'gmail-work': {
     name: 'gmail-work',
@@ -76,13 +129,13 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     command: 'npx',
     args: ['-y', '@cocal/google-calendar-mcp'],
     envBuilder: () => ({
-      GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS ??
-        '/Users/israel/.config/cope/credentials/google-oauth-work.json',
+      GOOGLE_OAUTH_CREDENTIALS: PATHS.GOOGLE_OAUTH_CREDS || '',
     }),
+    requiresPath: () => PATHS.GOOGLE_OAUTH_CREDS,
     displayName: 'Google Calendar (Work)',
     authType: 'auto',
     authPathsBuilder: () => [path.join(process.env.HOME || '', '.config', 'google-calendar-mcp')],
-    authNotes: 'Browser opens on first use',
+    authNotes: 'Browser opens on first use (requires OAuth)',
   },
 
   'ical-home': {
@@ -90,10 +143,14 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     description: 'Home calendars via iCloud/macOS Calendar',
     type: 'uv',
     command: 'uv',
-    args: ['--directory', '/Users/israel/code/mcp-ical', 'run', 'mcp-ical'],
+    argsBuilder: () => {
+      const dir = PATHS.MCP_ICAL_DIR;
+      return dir ? ['--directory', dir, 'run', 'mcp-ical'] : [];
+    },
+    requiresPath: () => PATHS.MCP_ICAL_DIR,
     displayName: 'iCal (Home)',
     authType: 'none',
-    authNotes: 'Local calendars',
+    authNotes: 'Local calendars (macOS only)',
   },
 
   'magister': {
@@ -101,7 +158,11 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     description: 'School schedules via Magister',
     type: 'node',
     command: 'node',
-    args: ['/Users/israel/code/israelroldan/magister-mcp/dist/index.js'],
+    argsBuilder: () => {
+      const p = PATHS.MAGISTER_MCP_PATH;
+      return p ? [p] : [];
+    },
+    requiresPath: () => PATHS.MAGISTER_MCP_PATH,
     envBuilder: () => ({
       MAGISTER_SCHOOL: process.env.MAGISTER_SCHOOL ?? 'sintlucas-vmbo',
       MAGISTER_USER: process.env.MAGISTER_USER ?? '',
@@ -160,8 +221,10 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     name: 'ynab',
     description: 'YNAB budget management',
     type: 'node',
-    command: '/Users/israel/code/mcp-ynab/.venv/bin/mcp-ynab',
+    // Command is built dynamically since it's the full path
+    commandBuilder: () => PATHS.YNAB_MCP_PATH || 'mcp-ynab',
     args: [],
+    requiresPath: () => PATHS.YNAB_MCP_PATH,
     envBuilder: () => ({
       YNAB_API_KEY: process.env.YNAB_API_TOKEN ?? '',
     }),
@@ -176,14 +239,16 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
     description: 'Browser automation via Playwright',
     type: 'npx',
     command: 'npx',
-    args: [
-      '-y', '@playwright/mcp@latest',
-      '--browser', 'chrome',
-      '--user-data-dir', '/Users/israel/.config/cope-agent/ics-browser-profile',
-    ],
+    argsBuilder: () => {
+      const profile = PATHS.PLAYWRIGHT_PROFILE;
+      return profile
+        ? ['-y', '@playwright/mcp@latest', '--browser', 'chrome', '--user-data-dir', profile]
+        : ['-y', '@playwright/mcp@latest', '--browser', 'chrome'];
+    },
+    requiresPath: () => PATHS.PLAYWRIGHT_PROFILE,
     displayName: 'Playwright (Browser)',
     authType: 'none',
-    authNotes: 'No auth required - browser handles site logins',
+    authNotes: 'Requires display (local only)',
   },
 
   'network-monitor': {
@@ -201,21 +266,54 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args'> & {
 };
 
 /**
+ * Check if an MCP server is available (all required paths/config present)
+ */
+export function isMcpAvailable(name: string): boolean {
+  const staticConfig = staticConfigs[name];
+  if (!staticConfig) return false;
+
+  // Check if required path is configured
+  if (staticConfig.requiresPath) {
+    const requiredPath = staticConfig.requiresPath();
+    if (!requiredPath) return false;
+  }
+
+  // Check if required env vars are set (for env auth type)
+  if (staticConfig.authType === 'env' && staticConfig.authEnvVars) {
+    for (const envVar of staticConfig.authEnvVars) {
+      if (!process.env[envVar]) return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * Get MCP server configuration by name
- * Environment variables and args are evaluated lazily when this is called
+ * Returns undefined if the MCP is not available (missing paths/config)
  */
 export function getMcpServerConfig(name: string): McpServerConfig | undefined {
   const staticConfig = staticConfigs[name];
   if (!staticConfig) return undefined;
 
-  // Build env vars, args, and auth paths lazily (now that dotenv has loaded)
-  const { envBuilder, argsBuilder, authPathsBuilder, args, ...rest } = staticConfig;
+  // Check if MCP is available
+  if (!isMcpAvailable(name)) {
+    if (process.env.DEBUG) {
+      console.log(`[DEBUG] MCP ${name} is not available (missing required config)`);
+    }
+    return undefined;
+  }
+
+  // Build env vars, args, command, and auth paths lazily (now that dotenv has loaded)
+  const { envBuilder, argsBuilder, commandBuilder, authPathsBuilder, requiresPath, args, command, ...rest } = staticConfig;
   const env = envBuilder ? envBuilder() : {};
   const resolvedArgs = argsBuilder ? argsBuilder() : args;
+  const resolvedCommand = commandBuilder ? commandBuilder() : command;
   const authPaths = authPathsBuilder ? authPathsBuilder() : rest.authPaths;
 
   return {
     ...rest,
+    command: resolvedCommand,
     args: resolvedArgs,
     env,
     authPaths,
@@ -290,11 +388,50 @@ export function buildMcpServersOption(serverNames: string[]): Record<string, unk
 }
 
 /**
- * List all available MCP servers
+ * List all MCP servers (both available and unavailable)
  */
-export function listMcpServers(): Array<{ name: string; description: string }> {
+export function listMcpServers(): Array<{ name: string; description: string; available: boolean }> {
   return Object.entries(staticConfigs).map(([name, config]) => ({
     name,
     description: config.description,
+    available: isMcpAvailable(name),
   }));
+}
+
+/**
+ * List only available MCP servers
+ */
+export function listAvailableMcpServers(): Array<{ name: string; description: string }> {
+  return listMcpServers()
+    .filter(s => s.available)
+    .map(({ name, description }) => ({ name, description }));
+}
+
+/**
+ * Get availability status for all MCPs (useful for debugging)
+ */
+export function getMcpAvailabilityStatus(): Record<string, { available: boolean; reason?: string }> {
+  const status: Record<string, { available: boolean; reason?: string }> = {};
+
+  for (const [name, config] of Object.entries(staticConfigs)) {
+    if (config.requiresPath) {
+      const path = config.requiresPath();
+      if (!path) {
+        status[name] = { available: false, reason: 'Required path not configured' };
+        continue;
+      }
+    }
+
+    if (config.authType === 'env' && config.authEnvVars) {
+      const missing = config.authEnvVars.filter(v => !process.env[v]);
+      if (missing.length > 0) {
+        status[name] = { available: false, reason: `Missing env vars: ${missing.join(', ')}` };
+        continue;
+      }
+    }
+
+    status[name] = { available: true };
+  }
+
+  return status;
 }

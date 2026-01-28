@@ -1,0 +1,44 @@
+# Caddyfile for COPE Agent HTTPS Reverse Proxy
+#
+# Replace {$DOMAIN} with your actual domain (e.g., cope.example.com)
+# or set the DOMAIN environment variable before running Caddy
+
+{$DOMAIN:cope.localhost} {
+    # Automatic HTTPS via Let's Encrypt
+    # Caddy handles certificate issuance and renewal automatically
+
+    # Reverse proxy to COPE Agent
+    reverse_proxy cope-agent:3847 {
+        # Pass original host header
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Support WebSocket/SSE for debug stream
+        flush_interval -1
+    }
+
+    # Security headers
+    header {
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        # XSS protection
+        X-Content-Type-Options "nosniff"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/cope-access.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+    }
+}
+
+# Health check endpoint (no HTTPS required for internal checks)
+:80 {
+    respond /health "OK" 200
+}

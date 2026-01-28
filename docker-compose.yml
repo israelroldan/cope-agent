@@ -1,0 +1,64 @@
+# COPE Agent Docker Compose Configuration
+# Usage: docker-compose up -d
+
+version: "3.8"
+
+services:
+  # Main COPE Agent HTTP Server
+  cope-agent:
+    build: .
+    container_name: cope-agent
+    restart: unless-stopped
+    ports:
+      - "3847:3847"
+    environment:
+      # Required credentials (set in .env file or environment)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - COPE_API_KEY=${COPE_API_KEY}
+      - SANITY_PROJECT_ID=${SANITY_PROJECT_ID}
+      - SANITY_DATASET=${SANITY_DATASET:-production}
+      - SANITY_API_TOKEN=${SANITY_API_TOKEN}
+      # Optional: Slack for socket mode bot
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN:-}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3847/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Caddy reverse proxy for HTTPS
+  caddy:
+    image: caddy:2-alpine
+    container_name: cope-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cope-agent
+
+  # Slack Socket Mode Bot (optional, for mobile access)
+  slack-bot:
+    build: .
+    container_name: cope-slack-bot
+    restart: unless-stopped
+    command: ["node", "dist/slack-bot.js"]
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
+      - SANITY_PROJECT_ID=${SANITY_PROJECT_ID}
+      - SANITY_DATASET=${SANITY_DATASET:-production}
+      - SANITY_API_TOKEN=${SANITY_API_TOKEN}
+    profiles:
+      - slack  # Only start with: docker-compose --profile slack up
+
+volumes:
+  caddy_data:
+  caddy_config:
