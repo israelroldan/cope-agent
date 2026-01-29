@@ -76,6 +76,26 @@ function getAgentForUser(userId: string): CopeAgent {
 }
 
 /**
+ * Convert standard markdown to Slack's mrkdwn format
+ */
+function markdownToSlack(text: string): string {
+  return text
+    // Convert **bold** to *bold*
+    .replace(/\*\*(.+?)\*\*/g, '*$1*')
+    // Convert __bold__ to *bold*
+    .replace(/__(.+?)__/g, '*$1*')
+    // Convert ~~strikethrough~~ to ~strikethrough~
+    .replace(/~~(.+?)~~/g, '~$1~')
+    // Convert [text](url) to <url|text>
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>')
+    // Convert headers to bold (### Header -> *Header*)
+    .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
+    // Keep code blocks as-is (``` works in Slack)
+    // Keep inline code as-is (` works in Slack)
+    ;
+}
+
+/**
  * Process a message and return the agent's response
  */
 async function processMessage(text: string, userId: string): Promise<string> {
@@ -83,7 +103,7 @@ async function processMessage(text: string, userId: string): Promise<string> {
 
   try {
     const response = await agent.chat(text);
-    return response;
+    return markdownToSlack(response);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`Error processing message for user ${userId}:`, msg);
