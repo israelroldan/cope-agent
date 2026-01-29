@@ -8,10 +8,91 @@ import * as http from 'http';
 // Auto-launch support
 import AutoLaunch from 'auto-launch';
 
-// Sanity real-time listener for timers
-// Import from main project's compiled dist/
-import { subscribeToTimers, isSanityConfigured, type SanityTimer, type TimerListenerEvent } from '../../dist/sanity/client.js';
-import { loadCredentialsIntoEnv } from '../../dist/config/index.js';
+// Sanity real-time listener for timers (inlined to avoid ESM/CJS conflict)
+import { createClient, type SanityClient } from '@sanity/client';
+import { config as loadDotenv } from 'dotenv';
+
+// Timer types
+interface SanityTimer {
+  _id: string;
+  _type: 'timer';
+  id: string;
+  label: string;
+  endTime: number;
+  durationMs: number;
+  status: 'active' | 'expired' | 'cancelled';
+  deviceId?: string;
+  _createdAt: string;
+  _updatedAt: string;
+}
+
+interface TimerListenerEvent {
+  type: 'sync' | 'create' | 'update' | 'delete';
+  timers: SanityTimer[];
+  changedTimer?: SanityTimer;
+  deletedId?: string;
+}
+
+// Credentials loading (inlined)
+function loadCredentialsIntoEnv(): void {
+  const credFile = path.join(process.env.HOME || '', '.config', 'cope-agent', '.env');
+  if (fs.existsSync(credFile)) {
+    loadDotenv({ path: credFile });
+  }
+}
+
+// Sanity client (lazy init)
+let sanityClient: SanityClient | null = null;
+
+function getSanityClient(): SanityClient {
+  if (!sanityClient) {
+    sanityClient = createClient({
+      projectId: process.env.SANITY_PROJECT_ID!,
+      dataset: process.env.SANITY_DATASET || 'production',
+      token: process.env.SANITY_API_TOKEN!,
+      apiVersion: '2024-01-01',
+      useCdn: false,
+    });
+  }
+  return sanityClient;
+}
+
+function isSanityConfigured(): boolean {
+  return !!(process.env.SANITY_PROJECT_ID && process.env.SANITY_API_TOKEN);
+}
+
+function subscribeToTimers(
+  callback: (event: TimerListenerEvent) => void,
+  onError?: (error: Error) => void
+): () => void {
+  if (!isSanityConfigured()) {
+    onError?.(new Error('Sanity not configured'));
+    return () => {};
+  }
+
+  const client = getSanityClient();
+  const initialQuery = `*[_type == "timer" && status == "active"] | order(endTime asc)`;
+
+  // Initial fetch
+  client.fetch<SanityTimer[]>(initialQuery)
+    .then(timers => callback({ type: 'sync', timers }))
+    .catch(error => onError?.(error instanceof Error ? error : new Error(String(error))));
+
+  // Real-time subscription
+  const subscription = client.listen<SanityTimer>(`*[_type == "timer"]`, {}, {
+    includeResult: true,
+    visibility: 'query',
+  }).subscribe({
+    next: () => {
+      client.fetch<SanityTimer[]>(initialQuery)
+        .then(timers => callback({ type: 'sync', timers }))
+        .catch(error => onError?.(error instanceof Error ? error : new Error(String(error))));
+    },
+    error: (error) => onError?.(error instanceof Error ? error : new Error(String(error))),
+  });
+
+  return () => subscription.unsubscribe();
+}
 
 // Server state
 let serverProcess: ChildProcess | null = null;

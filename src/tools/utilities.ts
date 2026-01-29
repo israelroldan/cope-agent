@@ -157,13 +157,24 @@ Use the 'pattern' parameter to specify which number to extract if there are mult
 };
 
 import * as https from 'https';
-
-// Timer API configuration
-const TIMER_HOST = 'localhost';
-const TIMER_PORT = 3847;
+import * as http from 'http';
 
 /**
- * Make an HTTPS request to the timer API, handling self-signed certs
+ * Timer API configuration
+ *
+ * COPE_SERVER_URL: Full URL to the COPE HTTP server (e.g., https://cope-agent.fly.dev)
+ *                  Defaults to https://localhost:3847 for local development
+ *
+ * COPE_API_KEY: API key for authenticating with remote server (required for non-localhost)
+ */
+function getTimerServerConfig(): { url: URL; apiKey?: string } {
+  const serverUrl = process.env.COPE_SERVER_URL || 'https://localhost:3847';
+  const apiKey = process.env.COPE_API_KEY;
+  return { url: new URL(serverUrl), apiKey };
+}
+
+/**
+ * Make an HTTP/HTTPS request to the timer API
  */
 function timerRequest(
   method: string,
@@ -171,18 +182,32 @@ function timerRequest(
   body?: unknown
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   return new Promise((resolve, reject) => {
+    const { url, apiKey } = getTimerServerConfig();
     const bodyStr = body ? JSON.stringify(body) : undefined;
+    const isHttps = url.protocol === 'https:';
+    const transport = isHttps ? https : http;
 
-    const req = https.request({
-      hostname: TIMER_HOST,
-      port: TIMER_PORT,
+    // Determine port: use explicit port or protocol default
+    const port = url.port
+      ? parseInt(url.port, 10)
+      : (isHttps ? 443 : 80);
+
+    const headers: Record<string, string> = {};
+    if (bodyStr) {
+      headers['Content-Type'] = 'application/json';
+      headers['Content-Length'] = String(Buffer.byteLength(bodyStr));
+    }
+    if (apiKey) {
+      headers['X-Api-Key'] = apiKey;
+    }
+
+    const req = transport.request({
+      hostname: url.hostname,
+      port,
       path,
       method,
-      rejectUnauthorized: false, // Allow self-signed certs
-      headers: bodyStr ? {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(bodyStr),
-      } : undefined,
+      rejectUnauthorized: false, // Allow self-signed certs for localhost
+      headers,
     }, (res) => {
       let data = '';
       res.on('data', chunk => { data += chunk; });
@@ -282,9 +307,11 @@ The timer countdown appears in the macOS menu bar next to the COPE icon.`,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      const serverUrl = process.env.COPE_SERVER_URL || 'https://localhost:3847';
       return JSON.stringify({
         success: false,
-        error: `Failed to set timer: ${msg}. Is the COPE server running?`,
+        error: `Timer failed - COPE server isn't running. You'll need to start the menubar app first.`,
+        debug: `Could not connect to ${serverUrl}: ${msg}`,
       });
     }
   },
