@@ -21,6 +21,7 @@ oauth_config:
       - im:write
       - app_mentions:read
       - users:read
+      - reactions:write
 
 settings:
   event_subscriptions:
