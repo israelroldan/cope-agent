@@ -60,19 +60,54 @@ const app = new App({
   logLevel: process.env.DEBUG ? LogLevel.DEBUG : LogLevel.INFO,
 });
 
-// Track active conversations per user
-const userAgents = new Map<string, CopeAgent>();
+// Track active conversations per thread (thread_ts -> agent)
+// This gives each thread its own conversation context
+const threadAgents = new Map<string, CopeAgent>();
 
 /**
- * Get or create an agent for a user
+ * Get or create an agent for a thread
+ * Each thread gets its own agent with independent conversation history
  */
-function getAgentForUser(userId: string): CopeAgent {
-  let agent = userAgents.get(userId);
+function getAgentForThread(threadTs: string): CopeAgent {
+  let agent = threadAgents.get(threadTs);
   if (!agent) {
     agent = new CopeAgent();
-    userAgents.set(userId, agent);
+    threadAgents.set(threadTs, agent);
   }
   return agent;
+}
+
+/**
+ * Fetch thread history from Slack and format as context
+ */
+async function fetchThreadContext(channel: string, threadTs: string, currentMessageTs: string): Promise<string | null> {
+  try {
+    const result = await app.client.conversations.replies({
+      token: SLACK_BOT_TOKEN,
+      channel,
+      ts: threadTs,
+      limit: 20, // Last 20 messages in thread
+    });
+
+    if (!result.messages || result.messages.length <= 1) {
+      return null; // No previous messages (or just the current one)
+    }
+
+    // Format thread history, excluding the current message
+    const history = result.messages
+      .filter(msg => msg.ts !== currentMessageTs)
+      .map(msg => {
+        const isBot = msg.bot_id !== undefined;
+        const role = isBot ? 'COPE' : 'User';
+        return `${role}: ${msg.text || ''}`;
+      })
+      .join('\n\n');
+
+    return history || null;
+  } catch (error) {
+    console.error('Error fetching thread history:', error);
+    return null;
+  }
 }
 
 /**
@@ -140,15 +175,21 @@ function markdownToSlack(text: string): string {
 /**
  * Process a message and return the agent's response
  */
-async function processMessage(text: string, userId: string): Promise<string> {
-  const agent = getAgentForUser(userId);
+async function processMessage(text: string, threadTs: string, threadContext: string | null): Promise<string> {
+  const agent = getAgentForThread(threadTs);
 
   try {
-    const response = await agent.chat(text);
+    // If this is a follow-up in a thread and agent is fresh, provide context
+    let messageToSend = text;
+    if (threadContext && agent.getHistory().length === 0) {
+      messageToSend = `[Previous conversation in this thread]\n${threadContext}\n\n[Current message]\n${text}`;
+    }
+
+    const response = await agent.chat(messageToSend);
     return markdownToSlack(response);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`Error processing message for user ${userId}:`, msg);
+    console.error(`Error processing message in thread ${threadTs}:`, msg);
     return `Sorry, I encountered an error: ${msg}`;
   }
 }
@@ -165,8 +206,10 @@ app.message(async ({ message, say }) => {
 
   const userId = message.user;
   const text = message.text;
+  const threadTs = ('thread_ts' in message && message.thread_ts) ? message.thread_ts : message.ts;
+  const isInThread = 'thread_ts' in message && message.thread_ts !== undefined;
 
-  console.log(`[DM] User ${userId}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+  console.log(`[DM] User ${userId}${isInThread ? ' (in thread)' : ''}: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
 
   // Show typing indicator (via reaction since Socket Mode doesn't support typing)
   try {
@@ -180,8 +223,14 @@ app.message(async ({ message, say }) => {
     // Ignore reaction errors
   }
 
+  // Fetch thread context if this is a follow-up message in a thread
+  let threadContext: string | null = null;
+  if (isInThread) {
+    threadContext = await fetchThreadContext(message.channel, threadTs, message.ts);
+  }
+
   // Process the message
-  const response = await processMessage(text, userId);
+  const response = await processMessage(text, threadTs, threadContext);
 
   // Remove typing indicator
   try {
@@ -195,10 +244,7 @@ app.message(async ({ message, say }) => {
     // Ignore reaction errors
   }
 
-  // Send response in a thread
-  // If already in a thread, continue it; otherwise start a new thread from the original message
-  const threadTs = ('thread_ts' in message && message.thread_ts) ? message.thread_ts : message.ts;
-
+  // Send response in a thread (threadTs already defined above)
   await say({
     text: response,
     thread_ts: threadTs,
@@ -221,6 +267,8 @@ app.message(async ({ message, say }) => {
 app.event('app_mention', async ({ event, say }) => {
   const userId = event.user || 'unknown';
   const text = event.text || '';
+  const threadTs = event.thread_ts || event.ts;
+  const isInThread = event.thread_ts !== undefined;
 
   // Remove the @mention from the text
   const cleanText = text.replace(/<@[A-Z0-9]+>/g, '').trim();
@@ -228,12 +276,12 @@ app.event('app_mention', async ({ event, say }) => {
   if (!cleanText) {
     await say({
       text: "Hi! I'm your COPE agent. Ask me anything or tell me what you need help with.",
-      thread_ts: event.ts, // Reply in thread
+      thread_ts: threadTs,
     });
     return;
   }
 
-  console.log(`[Mention] User ${userId} in ${event.channel}: ${cleanText.substring(0, 100)}...`);
+  console.log(`[Mention] User ${userId}${isInThread ? ' (in thread)' : ''} in ${event.channel}: ${cleanText.substring(0, 100)}...`);
 
   // Show thinking reaction
   try {
@@ -247,8 +295,14 @@ app.event('app_mention', async ({ event, say }) => {
     // Ignore
   }
 
+  // Fetch thread context if this is a follow-up in a thread
+  let threadContext: string | null = null;
+  if (isInThread) {
+    threadContext = await fetchThreadContext(event.channel, threadTs, event.ts);
+  }
+
   // Process the message
-  const response = await processMessage(cleanText, userId);
+  const response = await processMessage(cleanText, threadTs, threadContext);
 
   // Remove thinking reaction
   try {
@@ -265,7 +319,7 @@ app.event('app_mention', async ({ event, say }) => {
   // Reply in thread
   await say({
     text: response,
-    thread_ts: event.ts,
+    thread_ts: threadTs,
     blocks: [
       {
         type: 'section',
