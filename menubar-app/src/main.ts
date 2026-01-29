@@ -9,8 +9,9 @@ import * as http from 'http';
 import AutoLaunch from 'auto-launch';
 
 // Sanity real-time listener for timers
-import { subscribeToTimers, isSanityConfigured, type SanityTimer, type TimerListenerEvent } from '../../src/sanity/client.js';
-import { loadCredentialsIntoEnv } from '../../src/config/index.js';
+// Import from main project's compiled dist/
+import { subscribeToTimers, isSanityConfigured, type SanityTimer, type TimerListenerEvent } from '../../dist/sanity/client.js';
+import { loadCredentialsIntoEnv } from '../../dist/config/index.js';
 
 // Server state
 let serverProcess: ChildProcess | null = null;
