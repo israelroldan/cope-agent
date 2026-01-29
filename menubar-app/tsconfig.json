@@ -4,7 +4,7 @@
     "module": "commonjs",
     "lib": ["ES2022"],
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": "..",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -13,6 +13,13 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/**/*"],
+  "include": [
+    "src/**/*",
+    "../src/sanity/client.ts",
+    "../src/sanity/schema.ts",
+    "../src/sanity/tools.ts",
+    "../src/config/index.ts",
+    "../src/config/credentials.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }
