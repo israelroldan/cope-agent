@@ -133,9 +133,13 @@ app.message(async ({ message, say }) => {
     // Ignore reaction errors
   }
 
-  // Send response
+  // Send response in a thread
+  // If already in a thread, continue it; otherwise start a new thread from the original message
+  const threadTs = ('thread_ts' in message && message.thread_ts) ? message.thread_ts : message.ts;
+
   await say({
     text: response,
+    thread_ts: threadTs,
     // Use blocks for better formatting
     blocks: [
       {
@@ -148,7 +152,7 @@ app.message(async ({ message, say }) => {
     ],
   });
 
-  console.log(`[DM] Response sent to ${userId} (${response.length} chars)`);
+  console.log(`[DM] Response sent to ${userId} in thread (${response.length} chars)`);
 });
 
 // Handle @mentions in channels
