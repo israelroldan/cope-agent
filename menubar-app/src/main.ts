@@ -180,7 +180,6 @@ async function startServer(): Promise<void> {
     await new Promise(resolve => setTimeout(resolve, 500));
     if (await checkServerHealth()) {
       isServerRunning = true;
-      startTimerSubscription();
       updateTrayMenu();
       return;
     }
@@ -1012,7 +1011,10 @@ app.whenReady().then(async () => {
 
   createTray();
 
-  // Auto-start server on launch
+  // Start Sanity timer subscription immediately (works with remote or local timers)
+  startTimerSubscription();
+
+  // Auto-start local server (optional, for local MCP access)
   await startServer();
 
   // IPC handlers for debug window
