@@ -2,7 +2,7 @@
 #
 # Setup:
 #   fly launch --no-deploy          # Create app (first time)
-#   fly secrets set ANTHROPIC_API_KEY=... COPE_API_KEY=... ...
+#   fly secrets set ANTHROPIC_AUTH_TOKEN=... COPE_API_KEY=... ...
 #   fly deploy                       # Deploy
 #
 # Or just push to main for auto-deploy (after GitHub Actions setup)

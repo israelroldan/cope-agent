@@ -13,7 +13,7 @@ services:
       - "3847:3847"
     environment:
       # Required credentials (set in .env file or environment)
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
       - COPE_API_KEY=${COPE_API_KEY}
       - SANITY_PROJECT_ID=${SANITY_PROJECT_ID}
       - SANITY_DATASET=${SANITY_DATASET:-production}
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
     command: ["node", "dist/slack-bot.js"]
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - SANITY_PROJECT_ID=${SANITY_PROJECT_ID}

@@ -8,7 +8,7 @@
  * Required environment variables:
  *   SLACK_BOT_TOKEN - Bot OAuth token (xoxb-...)
  *   SLACK_APP_TOKEN - App-level token for Socket Mode (xapp-...)
- *   ANTHROPIC_API_KEY - For agent functionality
+ *   ANTHROPIC_AUTH_TOKEN - For agent functionality
  *
  * Slack App Setup:
  *   1. Create app at api.slack.com/apps
@@ -30,7 +30,7 @@ config({ quiet: true });
 // Validate required environment variables
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN;
 
 if (!SLACK_BOT_TOKEN) {
   console.error('Error: SLACK_BOT_TOKEN environment variable is required');
@@ -44,8 +44,8 @@ if (!SLACK_APP_TOKEN) {
   process.exit(1);
 }
 
-if (!ANTHROPIC_API_KEY) {
-  console.error('Error: ANTHROPIC_API_KEY environment variable is required');
+if (!ANTHROPIC_AUTH_TOKEN) {
+  console.error('Error: ANTHROPIC_AUTH_TOKEN environment variable is required');
   process.exit(1);
 }
 
