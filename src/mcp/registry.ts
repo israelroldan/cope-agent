@@ -86,6 +86,19 @@ export interface McpServerConfig {
  * For Docker containers, use argsBuilder to inject env vars with actual values
  * since `-e VAR` only works when VAR is in the shell's environment.
  */
+/**
+ * Check if running in a headless environment (no browser available)
+ */
+function isHeadless(): boolean {
+  // On Linux without DISPLAY, we're headless
+  if (process.platform === 'linux' && !process.env.DISPLAY) return true;
+  // Fly.io sets this
+  if (process.env.FLY_APP_NAME) return true;
+  // Docker typically doesn't have a display
+  if (process.env.container === 'docker') return true;
+  return false;
+}
+
 const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'command'> & {
   command?: string;
   commandBuilder?: () => string | undefined;
@@ -94,6 +107,7 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'comm
   envBuilder?: () => Record<string, string>;
   authPathsBuilder?: () => string[];
   requiresPath?: () => string | undefined;  // Returns undefined if not available
+  requiresBrowser?: boolean;  // True if MCP needs browser for OAuth
 }> = {
   'gmail-work': {
     name: 'gmail-work',
@@ -105,6 +119,7 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'comm
     authType: 'auto',
     authPathsBuilder: () => [path.join(process.env.HOME || '', '.gmail-mcp')],
     authNotes: 'Browser opens on first use',
+    requiresBrowser: true,
   },
 
   'slack-tatoma': {
@@ -203,6 +218,7 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'comm
     authType: 'mcp-remote',
     authUrl: 'https://mcp.notion.com/mcp?workspace=work',
     authNotes: 'Browser opens on first use - authorize WORK workspace',
+    requiresBrowser: true,
   },
 
   'miro': {
@@ -215,6 +231,7 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'comm
     authType: 'mcp-remote',
     authUrl: 'https://mcp.miro.com',
     authNotes: 'Browser opens on first use',
+    requiresBrowser: true,
   },
 
   'ynab': {
@@ -271,6 +288,11 @@ const staticConfigs: Record<string, Omit<McpServerConfig, 'env' | 'args' | 'comm
 export function isMcpAvailable(name: string): boolean {
   const staticConfig = staticConfigs[name];
   if (!staticConfig) return false;
+
+  // Check if MCP requires browser but we're headless
+  if (staticConfig.requiresBrowser && isHeadless()) {
+    return false;
+  }
 
   // Check if required path is configured
   if (staticConfig.requiresPath) {
@@ -414,6 +436,12 @@ export function getMcpAvailabilityStatus(): Record<string, { available: boolean;
   const status: Record<string, { available: boolean; reason?: string }> = {};
 
   for (const [name, config] of Object.entries(staticConfigs)) {
+    // Check browser requirement first
+    if (config.requiresBrowser && isHeadless()) {
+      status[name] = { available: false, reason: 'Requires browser for OAuth (headless environment)' };
+      continue;
+    }
+
     if (config.requiresPath) {
       const path = config.requiresPath();
       if (!path) {
