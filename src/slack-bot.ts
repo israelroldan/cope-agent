@@ -217,7 +217,7 @@ app.message(async ({ message, say }) => {
       token: SLACK_BOT_TOKEN,
       channel: message.channel,
       timestamp: message.ts,
-      name: 'hourglass_flowing_sand',
+      name: 'eyes',
     });
   } catch {
     // Ignore reaction errors
@@ -238,7 +238,7 @@ app.message(async ({ message, say }) => {
       token: SLACK_BOT_TOKEN,
       channel: message.channel,
       timestamp: message.ts,
-      name: 'hourglass_flowing_sand',
+      name: 'eyes',
     });
   } catch {
     // Ignore reaction errors
@@ -289,7 +289,7 @@ app.event('app_mention', async ({ event, say }) => {
       token: SLACK_BOT_TOKEN,
       channel: event.channel,
       timestamp: event.ts,
-      name: 'thinking_face',
+      name: 'eyes',
     });
   } catch {
     // Ignore
@@ -310,7 +310,7 @@ app.event('app_mention', async ({ event, say }) => {
       token: SLACK_BOT_TOKEN,
       channel: event.channel,
       timestamp: event.ts,
-      name: 'thinking_face',
+      name: 'eyes',
     });
   } catch {
     // Ignore
