@@ -914,7 +914,9 @@ const server = useHttps
     });
 
 // Start server
-server.listen(PORT, () => {
+// Bind to 0.0.0.0 for container/Fly.io compatibility
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
   const certStatus = useHttps
     ? '✅ SSL enabled (mkcert certificates)'
     : '⚠️  No SSL (run setup below for HTTPS)';
