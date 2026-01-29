@@ -76,20 +76,62 @@ function getAgentForUser(userId: string): CopeAgent {
 }
 
 /**
+ * Convert a markdown table to Slack-friendly format
+ */
+function convertTable(tableText: string): string {
+  const lines = tableText.trim().split('\n');
+  if (lines.length < 2) return tableText;
+
+  // Parse header
+  const headerLine = lines[0];
+  const headers = headerLine.split('|').map(h => h.trim()).filter(h => h);
+
+  // Skip separator line (index 1), parse data rows
+  const dataRows: string[][] = [];
+  for (let i = 2; i < lines.length; i++) {
+    const cells = lines[i].split('|').map(c => c.trim()).filter(c => c);
+    if (cells.length > 0) {
+      dataRows.push(cells);
+    }
+  }
+
+  // Format as list
+  if (dataRows.length === 0) return tableText;
+
+  const formatted = dataRows.map(row => {
+    // Combine header with value for each cell
+    const parts = row.map((cell, i) => {
+      const header = headers[i] || '';
+      return header ? `${header}: ${cell}` : cell;
+    });
+    return `• ${parts.join(' | ')}`;
+  }).join('\n');
+
+  return formatted;
+}
+
+/**
  * Convert standard markdown to Slack's mrkdwn format
  */
 function markdownToSlack(text: string): string {
-  return text
-    // Convert **bold** to *bold*
-    .replace(/\*\*(.+?)\*\*/g, '*$1*')
+  // First, handle tables (must be done before other replacements)
+  // Match markdown tables: starts with |, has separator row with dashes
+  const tableRegex = /(\|[^\n]+\|\n\|[-:\s|]+\|\n(?:\|[^\n]+\|\n?)+)/g;
+  let result = text.replace(tableRegex, (match) => convertTable(match));
+
+  return result
+    // Convert **bold** to *bold* (non-greedy, handles multiple on same line)
+    .replace(/\*\*([^*]+)\*\*/g, '*$1*')
     // Convert __bold__ to *bold*
-    .replace(/__(.+?)__/g, '*$1*')
+    .replace(/__([^_]+)__/g, '*$1*')
     // Convert ~~strikethrough~~ to ~strikethrough~
-    .replace(/~~(.+?)~~/g, '~$1~')
+    .replace(/~~([^~]+)~~/g, '~$1~')
     // Convert [text](url) to <url|text>
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<$2|$1>')
     // Convert headers to bold (### Header -> *Header*)
     .replace(/^#{1,6}\s+(.+)$/gm, '*$1*')
+    // Remove horizontal rules (--- or ***)
+    .replace(/^[-*]{3,}$/gm, '───')
     // Keep code blocks as-is (``` works in Slack)
     // Keep inline code as-is (` works in Slack)
     ;
