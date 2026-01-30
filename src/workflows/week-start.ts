@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Get week date context
@@ -15,16 +16,16 @@ function getWeekContext(): { weekNumber: number; monday: string } {
   const diff = now.getTime() - start.getTime();
   const oneWeek = 1000 * 60 * 60 * 24 * 7;
   const weekNumber = Math.ceil(diff / oneWeek);
-  
+
   // Get Monday of current week
   const day = now.getDay();
   const mondayOffset = day === 0 ? -6 : 1 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + mondayOffset);
-  
+
   return {
     weekNumber,
-    monday: monday.toISOString().split('T')[0],
+    monday: getLocalDateString(monday),
   };
 }
 

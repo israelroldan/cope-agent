@@ -6,21 +6,23 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString, getDatetimeContext } from '../core/datetime.js';
 
 /**
  * Get today's date in various formats
  */
 function getDateContext(): { today: string; dayOfWeek: string; formatted: string } {
   const now = new Date();
-  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const ctx = getDatetimeContext();
   return {
-    today: now.toISOString().split('T')[0],
-    dayOfWeek: days[now.getDay()],
+    today: getLocalDateString(now),
+    dayOfWeek: ctx.dayOfWeek,
     formatted: now.toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
       month: 'long',
       day: 'numeric',
+      timeZone: ctx.timezone,
     }),
   };
 }

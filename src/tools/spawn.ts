@@ -28,6 +28,7 @@ import {
   sanityToolsToAnthropicTools,
   executeSanityTool,
 } from '../sanity/tools.js';
+import { formatDatetimeForPrompt } from '../core/datetime.js';
 
 // Debug client for specialist events
 const debug = getAgentDebugClient();
@@ -224,11 +225,14 @@ export async function spawnSpecialist(options: SpawnOptions): Promise<SpawnResul
         console.log(`[DEBUG] ${specialist}: Turn ${turnCount}/${maxTurns}`);
       }
 
-      // Make API call
+      // Make API call - inject datetime context into system prompt
+      const datetimeContext = formatDatetimeForPrompt();
+      const systemPromptWithDatetime = `${agentDef.systemPrompt}\n\n---\n${datetimeContext}`;
+
       const response = await getClient().messages.create({
         model: getModelId(agentDef.model),
         max_tokens: 4096,
-        system: agentDef.systemPrompt,
+        system: systemPromptWithDatetime,
         tools: tools.length > 0 ? tools : undefined,
         messages,
       });

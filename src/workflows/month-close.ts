@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Get current month range
@@ -25,8 +26,8 @@ function getMonthRange(): {
   const monthName = monthStart.toLocaleString('en-US', { month: 'long' });
 
   return {
-    monthStart: monthStart.toISOString().split('T')[0],
-    monthEnd: monthEnd.toISOString().split('T')[0],
+    monthStart: getLocalDateString(monthStart),
+    monthEnd: getLocalDateString(monthEnd),
     monthName,
     year,
   };

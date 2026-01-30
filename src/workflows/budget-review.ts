@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Get current week date range
@@ -29,8 +30,8 @@ function getWeekRange(): { monday: string; sunday: string; weekNumber: number } 
   const weekNumber = Math.ceil(diff / oneWeek);
 
   return {
-    monday: monday.toISOString().split('T')[0],
-    sunday: sunday.toISOString().split('T')[0],
+    monday: getLocalDateString(monday),
+    sunday: getLocalDateString(sunday),
     weekNumber,
   };
 }

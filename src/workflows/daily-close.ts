@@ -5,12 +5,13 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Get today's date for queries
  */
 function getTodayDate(): string {
-  return new Date().toISOString().split('T')[0];
+  return getLocalDateString();
 }
 
 /**

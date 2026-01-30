@@ -26,6 +26,7 @@ import type {
   TimerInput,
 } from './schema.js';
 import { DOCUMENT_TYPES } from './schema.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Sanity tool interface (similar to UtilityTool)
@@ -1176,9 +1177,9 @@ Filter by:
       const dueFilter = input.dueFilter || 'all';
       const limit = Number(input.limit) || 20;
 
-      // Get today's date in ISO format
-      const today = new Date().toISOString().split('T')[0];
-      const weekFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      // Get today's date in local timezone
+      const today = getLocalDateString();
+      const weekFromNow = getLocalDateString(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
 
       let query = `*[_type == "${DOCUMENT_TYPES.TASK}"`;
 
@@ -1371,7 +1372,7 @@ Example: Record a decision about architecture, hiring, priorities, etc.`,
         context: input.context ? String(input.context) : undefined,
         rationale: input.rationale ? String(input.rationale) : undefined,
         status: (input.status as DecisionInput['status']) || 'made',
-        decidedAt: input.decidedAt ? String(input.decidedAt) : new Date().toISOString().split('T')[0],
+        decidedAt: input.decidedAt ? String(input.decidedAt) : getLocalDateString(),
         relatedGoal: input.relatedGoal ? String(input.relatedGoal) : undefined,
         tags: Array.isArray(input.tags) ? input.tags.map(String) : undefined,
       };

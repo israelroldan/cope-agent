@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDefinition, SpecialistTask } from './types.js';
+import { getLocalDateString } from '../core/datetime.js';
 
 /**
  * Get week date range
@@ -12,25 +13,25 @@ import type { WorkflowDefinition, SpecialistTask } from './types.js';
 function getWeekRange(): { monday: string; friday: string; weekNumber: number } {
   const now = new Date();
   const day = now.getDay();
-  
+
   // Get Monday
   const mondayOffset = day === 0 ? -6 : 1 - day;
   const monday = new Date(now);
   monday.setDate(now.getDate() + mondayOffset);
-  
+
   // Get Friday
   const friday = new Date(monday);
   friday.setDate(monday.getDate() + 4);
-  
+
   // Week number
   const start = new Date(now.getFullYear(), 0, 1);
   const diff = now.getTime() - start.getTime();
   const oneWeek = 1000 * 60 * 60 * 24 * 7;
   const weekNumber = Math.ceil(diff / oneWeek);
-  
+
   return {
-    monday: monday.toISOString().split('T')[0],
-    friday: friday.toISOString().split('T')[0],
+    monday: getLocalDateString(monday),
+    friday: getLocalDateString(friday),
     weekNumber,
   };
 }
